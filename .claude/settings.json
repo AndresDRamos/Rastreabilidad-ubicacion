@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -NoProfile -File \"${CLAUDE_PROJECT_DIR}\\scripts\\hooks\\netteo-tests-gate.ps1\""
+          },
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -NoProfile -File \"${CLAUDE_PROJECT_DIR}\\scripts\\hooks\\typecheck-frontend.ps1\""
+          },
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -NoProfile -File \"${CLAUDE_PROJECT_DIR}\\scripts\\hooks\\types-mirror-warning.ps1\""
+          }
+        ]
+      }
+    ]
+  }
+}
