@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+build/
+dist/
+
+# Env / secretos
+.env
+.env.local
+.env.test
+*.local
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# Build artefacts del frontend que se copian al backend para deploy
+backend/src/rbom_api/static/
+
+# IDE / sistema
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml

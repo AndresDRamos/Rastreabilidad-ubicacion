@@ -1,0 +1,14 @@
+
+> rastreabilidad-bom-frontend@0.1.0 dev
+> vite --port 5173 --strictPort --host 127.0.0.1
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m3088[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m9:17:19 a.m.[22m [36m[1m[vite][22m[39m [32m✨ new dependencies optimized: [33m@xyflow/react, dagre[32m[39m
+[2m9:17:19 a.m.[22m [36m[1m[vite][22m[39m [32m✨ optimized dependencies changed. reloading[39m
+[2m9:21:54 a.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Canvas/ArbolCanvas.tsx, /src/index.css[22m
+[2m9:22:04 a.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Canvas/ArbolCanvas.tsx, /src/index.css[22m
+[2m9:22:21 a.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Canvas/ArbolCanvas.tsx, /src/index.css[22m
+[2m9:22:38 a.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/index.css[22m
