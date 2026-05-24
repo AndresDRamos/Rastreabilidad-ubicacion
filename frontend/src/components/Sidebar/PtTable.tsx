@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePts } from "@/api/queries";
 import type { FilaListado } from "@/api/types";
 import { useUiStore } from "@/store/useUiStore";
+import { PartThumbnail } from "@/components/Canvas/nodes/PartThumbnail";
 
 const PAGE_SIZE = 25;
 
@@ -39,6 +40,16 @@ export function PtTable() {
         return b.PiezasPend - a.PiezasPend;
       });
   }, [filas, filters]);
+
+  const totales = useMemo(() => {
+    let req = 0;
+    let pastDue = 0;
+    for (const f of filasFiltradas) {
+      req += f.PiezasPend;
+      pastDue += f.PiezasPastDue;
+    }
+    return { req, pastDue };
+  }, [filasFiltradas]);
 
   const totalPages = Math.max(1, Math.ceil(filasFiltradas.length / PAGE_SIZE));
 
@@ -77,8 +88,15 @@ export function PtTable() {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="px-4 py-2 bg-surface-muted/80 backdrop-blur-sm border-b border-surface-border text-xs text-ink-subtle">
-        {filasFiltradas.length} de {filas?.length ?? 0} PTs
+      <div className="px-4 py-2 bg-surface-muted/80 backdrop-blur-sm border-b border-surface-border flex items-center justify-between gap-2 text-xs">
+        <span className="text-sm font-semibold tabular-nums text-ink">
+          {fmtInt(totales.req)}
+        </span>
+        {totales.pastDue > 0 ? (
+          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums bg-status-empty/10 text-status-empty">
+            {fmtInt(totales.pastDue)} past-due
+          </span>
+        ) : null}
       </div>
       <ul className="flex-1 overflow-y-auto divide-y divide-surface-border">
         {pageRows.map((f) => (
@@ -147,22 +165,28 @@ function PtRow({
             readOnly
             className="mt-1 h-4 w-4 rounded border-surface-border text-status-pt accent-status-pt"
           />
+          <PartThumbnail clave={fila.PT} size={48} />
           <div className="flex-1 min-w-0">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="font-mono text-sm font-medium text-ink truncate">
-                {fila.PT}
+            <div className="font-mono text-sm font-medium text-ink truncate">
+              {fila.PT}
+            </div>
+            <div className="flex items-center gap-1 text-xs mt-0.5">
+              <span
+                className="text-ink-muted truncate min-w-0 flex-1"
+                title={fila.Cliente}
+              >
+                {fila.Cliente}
               </span>
-              <span className="text-sm tabular-nums text-ink">
+              {fila.Ciudad ? (
+                <span className="text-ink-subtle shrink-0">· {fila.Ciudad}</span>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-between gap-2 mt-1.5">
+              <span className="text-sm font-semibold tabular-nums text-ink">
                 {fmtInt(fila.PiezasPend)}
               </span>
-            </div>
-            <div className="flex items-baseline justify-between gap-2 mt-0.5">
-              <span className="text-xs text-ink-muted truncate">
-                {fila.Cliente}
-                {fila.Ciudad ? <span className="text-ink-subtle"> · {fila.Ciudad}</span> : null}
-              </span>
               {fila.PiezasPastDue > 0 ? (
-                <span className="text-xs tabular-nums text-status-empty font-medium">
+                <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums bg-status-empty/10 text-status-empty">
                   {fmtInt(fila.PiezasPastDue)} past-due
                 </span>
               ) : null}
