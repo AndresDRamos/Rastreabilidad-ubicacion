@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .config import get_settings
 from .logging_setup import CorrelationIdMiddleware, configurar_logging, log
-from .routers import arbol, health, pts
+from .routers import arbol, bloques, health, pts
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(pts.router)
     app.include_router(arbol.router)
+    app.include_router(bloques.router)
 
     # Static frontend (build de produccion). En dev no existe; en prod copiamos
     # frontend/dist a backend/src/rbom_api/static via scripts/build.ps1. Debe

@@ -135,3 +135,36 @@ class ArbolPT(_Base):
     pt: DemandaPT
     componentes: list[NodoComponente]
     advertencias: list[str] = Field(default_factory=list)
+
+
+# ---------- Vista Resumen: bloques por proceso ------------------------------
+
+class BloqueProceso(_Base):
+    """Una fila por proceso destino (idProcesoSiguiente) con totales de WIP.
+
+    Alimenta las tarjetas del dashboard "Resumen". Las etiquetas ya
+    remisionadas estan excluidas — ver Q_bloques.sql.
+    """
+    idProceso: Optional[int] = None
+    Proceso: str
+    Etiquetas: int
+    Piezas: float
+    Componentes: int
+    Plantas: int
+
+
+class PTEnProceso(_Base):
+    """Un PT cuyos componentes tienen WIP esperando entrar al proceso
+    seleccionado en el drill-down de la vista Resumen."""
+    idPT: int
+    PT: str
+    DescripcionPT: Optional[str] = None
+    ComponentesEnProceso: int
+    PiezasEnProceso: float
+    EtiquetasEnProceso: int
+
+
+class Planta(_Base):
+    """Alimenta el selector de planta en la vista Resumen."""
+    idPlanta: int
+    NombrePlanta: str
