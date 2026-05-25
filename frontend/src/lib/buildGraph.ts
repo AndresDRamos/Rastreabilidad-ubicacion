@@ -58,6 +58,7 @@ export interface ProcessNodeData extends Record<string, unknown> {
   idProceso: number;
   proceso: string;
   ruta: string | null;
+  idPlanta: number | null;
   ordenEnRuta: number;
   totalPasos: number;
   reqPaso: number;
@@ -197,6 +198,7 @@ export function buildGraph(arbol: ArbolPT, expanded: Set<number>): BuildResult {
           idProceso: paso.idProceso,
           proceso: paso.proceso,
           ruta: paso.ruta,
+          idPlanta: paso.idPlanta,
           ordenEnRuta: idx + 1,
           totalPasos: pasosReales.length,
           reqPaso: paso.req_paso,

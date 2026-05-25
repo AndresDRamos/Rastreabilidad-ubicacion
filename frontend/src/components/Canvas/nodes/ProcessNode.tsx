@@ -3,7 +3,7 @@ import type { NodeProps, Node } from "@xyflow/react";
 
 import { useUiStore } from "@/store/useUiStore";
 import type { ProcessNodeData } from "@/lib/buildGraph";
-import { fmtInt } from "@/lib/format";
+import { fmtInt, fmtPlanta } from "@/lib/format";
 
 type Props = NodeProps<Node<ProcessNodeData>>;
 
@@ -35,10 +35,15 @@ export function ProcessNode({ data }: Props) {
         className="!w-2 !h-2 !bg-ink-subtle !border-0"
       />
 
-      <div className="px-2.5 py-1 border-b border-surface-border bg-surface-muted/60 flex items-center justify-between">
+      <div className="px-2.5 py-1 border-b border-surface-border bg-surface-muted/60 flex items-center justify-between gap-2">
         <span className="text-[10px] font-medium text-ink-subtle tabular-nums">
           Paso {data.ordenEnRuta}/{data.totalPasos}
         </span>
+        {fmtPlanta(data.idPlanta) ? (
+          <span className="text-[10px] font-medium text-ink-subtle truncate">
+            {fmtPlanta(data.idPlanta)}
+          </span>
+        ) : null}
       </div>
 
       <div className="px-2.5 py-2">
