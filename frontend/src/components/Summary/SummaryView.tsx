@@ -37,10 +37,6 @@ export function SummaryView() {
             <h2 className="text-base font-semibold text-ink">
               Inventario por proceso destino
             </h2>
-            <p className="text-xs text-ink-muted mt-1">
-              Piezas con WIP activo agrupadas por el proceso al que entran a
-              continuacion. Excluye etiquetas ya remisionadas.
-            </p>
           </div>
           {bloques ? (
             <div className="flex items-center gap-4 text-right shrink-0">
