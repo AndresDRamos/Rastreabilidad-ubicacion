@@ -23,17 +23,23 @@ export function usePts(ventana: number = 3, fechaMax: string = "") {
   });
 }
 
-export function useArbol(idPt: number | null, ventana: number = 3) {
+export function useArbol(
+  idPt: number | null,
+  ventana: number = 3,
+  fechaMax: string = "",
+) {
+  const fechaMaxParam = fechaMax || undefined;
   return useQuery<ArbolPT>({
-    queryKey: ["arbol", idPt, ventana],
+    queryKey: ["arbol", idPt, ventana, fechaMaxParam ?? null],
     enabled: idPt !== null,
     queryFn: async () => {
       const { data } = await apiClient.get<ArbolPT>(`/pts/${idPt}/arbol`, {
-        params: { ventana },
+        params: { ventana, fecha_max: fechaMaxParam },
       });
       return data;
     },
-    // Cache infinito durante la sesion: un PT pesado solo se descarga una vez.
+    // Cache infinito durante la sesion: un PT pesado solo se descarga una vez
+    // por combinacion (idPt, ventana, fechaMax).
     staleTime: Infinity,
     gcTime: Infinity,
   });

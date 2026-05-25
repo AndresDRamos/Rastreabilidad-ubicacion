@@ -36,10 +36,11 @@ interface Props {
 
 function ArbolCanvasInner({ idPt }: Props) {
   const ventana = useUiStore((s) => s.ventana);
+  const fechaMax = useUiStore((s) => s.filters.fechaMax);
   const expanded = useUiStore((s) => s.expanded);
   const toggleExpanded = useUiStore((s) => s.toggleExpanded);
   const setExpanded = useUiStore((s) => s.setExpanded);
-  const { data, isLoading, error } = useArbol(idPt, ventana);
+  const { data, isLoading, error } = useArbol(idPt, ventana, fechaMax);
 
   const expandableIds = useMemo<number[]>(() => {
     if (!data) return [];

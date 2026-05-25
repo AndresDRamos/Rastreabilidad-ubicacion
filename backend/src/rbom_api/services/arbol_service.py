@@ -43,11 +43,12 @@ def armar_arbol(
     idPt: int,
     ventana_meses: int,
     settings: Settings,
+    fecha_max: str | None = None,
 ) -> ArbolPT:
     """Lee Q_detalle (4 result-sets), valida y arma el arbol netteado."""
     t0 = time.perf_counter()
     demanda, bom_raw, ruta_raw, wip_raw = db.fetch_detalle(
-        conn, idPT=idPt, ventana_meses=ventana_meses
+        conn, idPT=idPt, ventana_meses=ventana_meses, fecha_max=fecha_max
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
@@ -55,6 +56,7 @@ def armar_arbol(
         query="Q_detalle",
         idPt=idPt,
         ventana_meses=ventana_meses,
+        fecha_max=fecha_max,
         rows_demanda=len(demanda),
         rows_bom=len(bom_raw),
         rows_ruta=len(ruta_raw),
