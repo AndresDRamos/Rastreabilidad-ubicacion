@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Background,
   Controls,
@@ -16,7 +16,7 @@ import "@xyflow/react/dist/style.css";
 
 import { useArbol } from "@/api/queries";
 import { useUiStore } from "@/store/useUiStore";
-import { buildGraph } from "@/lib/buildGraph";
+import { buildGraph, type HighlightFiltro } from "@/lib/buildGraph";
 import { layoutLR } from "@/lib/layout";
 import { getCachedLayout, keyFor, setCachedLayout } from "@/lib/layoutCache";
 
@@ -37,10 +37,20 @@ interface Props {
 function ArbolCanvasInner({ idPt }: Props) {
   const ventana = useUiStore((s) => s.ventana);
   const fechaMax = useUiStore((s) => s.filters.fechaMax);
+  const plantaId = useUiStore((s) => s.filters.plantaId);
   const expanded = useUiStore((s) => s.expanded);
   const toggleExpanded = useUiStore((s) => s.toggleExpanded);
   const setExpanded = useUiStore((s) => s.setExpanded);
+  const procesoFiltro = useUiStore((s) => s.procesoFiltro);
   const { data, isLoading, error } = useArbol(idPt, ventana, fechaMax);
+
+  // Drill-down activo desde el Resumen. Si esta seteado, marca los
+  // ProcessNode que matchean (idProceso + idPlanta) y dispara la
+  // auto-expansion de los componentes que los contienen.
+  const highlight = useMemo<HighlightFiltro | null>(() => {
+    if (!procesoFiltro) return null;
+    return { idProceso: procesoFiltro.idProceso, idPlanta: plantaId };
+  }, [procesoFiltro, plantaId]);
 
   const expandableIds = useMemo<number[]>(() => {
     if (!data) return [];
@@ -49,13 +59,48 @@ function ArbolCanvasInner({ idPt }: Props) {
       .map((c) => c.idComp);
   }, [data]);
 
+  // Componentes cuyos pasos reales matchean el filtro de drill-down.
+  // Se usa para auto-expandir solo la primera vez que se entra a una
+  // combinacion (idPt, idProceso, idPlanta).
+  const idsAExpandir = useMemo<number[]>(() => {
+    if (!data || !highlight) return [];
+    return data.componentes
+      .filter((c) =>
+        c.ruta.some(
+          (p) =>
+            !p.es_virtual &&
+            p.idProceso === highlight.idProceso &&
+            (highlight.idPlanta === null || p.idPlanta === highlight.idPlanta),
+        ),
+      )
+      .map((c) => c.idComp);
+  }, [data, highlight]);
+
+  // Registro de combinaciones ya auto-expandidas. Evita re-expandir lo que
+  // el usuario haya colapsado manualmente despues, incluso si cambia de tab
+  // y vuelve. Solo se re-aplica si cambia el procesoFiltro o la planta.
+  const autoExpandedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!data || !highlight || idsAExpandir.length === 0) return;
+    const key = `${idPt}|${highlight.idProceso}|${highlight.idPlanta ?? "x"}`;
+    if (autoExpandedKeyRef.current === key) return;
+    autoExpandedKeyRef.current = key;
+    // Union: preservar lo que el usuario ya tenia expandido.
+    const next = new Set(expanded);
+    for (const id of idsAExpandir) next.add(id);
+    if (next.size !== expanded.size) setExpanded(next);
+    // expanded no va en deps: solo queremos disparar al cambiar la
+    // combinacion (PT, proceso, planta) o cuando llega el arbol.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, highlight, idsAExpandir, idPt, setExpanded]);
+
   const allExpanded =
     expandableIds.length > 0 && expandableIds.every((id) => expanded.has(id));
   const noneExpanded = expandableIds.every((id) => !expanded.has(id));
 
   const layoutResult = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
     if (!data) return { nodes: [], edges: [] };
-    const { nodes: rawNodes, edges } = buildGraph(data, expanded);
+    const { nodes: rawNodes, edges } = buildGraph(data, expanded, highlight);
     const nodes = rawNodes as unknown as Node[];
 
     const key = keyFor(idPt, expanded);
@@ -76,7 +121,7 @@ function ArbolCanvasInner({ idPt }: Props) {
     for (const n of placed) cache.set(n.id, n.position);
     setCachedLayout(key, cache);
     return { nodes: placed as unknown as Node[], edges };
-  }, [data, idPt, expanded]);
+  }, [data, idPt, expanded, highlight]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);

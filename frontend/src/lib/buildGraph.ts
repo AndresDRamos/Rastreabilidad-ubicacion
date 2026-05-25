@@ -63,6 +63,14 @@ export interface ProcessNodeData extends Record<string, unknown> {
   totalPasos: number;
   reqPaso: number;
   wipEnPaso: number;
+  highlighted: boolean;
+}
+
+/** Filtro de resaltado: marca como `highlighted` los ProcessNode cuyo paso
+ *  coincide con el drill-down activo desde el Resumen. */
+export interface HighlightFiltro {
+  idProceso: number;
+  idPlanta: number | null;
 }
 
 export type ArbolNode =
@@ -109,7 +117,11 @@ function nodoEntrada(
   return cardIdNode(comp.idComp, idPt);
 }
 
-export function buildGraph(arbol: ArbolPT, expanded: Set<number>): BuildResult {
+export function buildGraph(
+  arbol: ArbolPT,
+  expanded: Set<number>,
+  highlight: HighlightFiltro | null = null,
+): BuildResult {
   const nodes: ArbolNode[] = [];
   const edges: Edge[] = [];
 
@@ -188,6 +200,11 @@ export function buildGraph(arbol: ArbolPT, expanded: Set<number>): BuildResult {
     if (pasosReales.length === 0) continue;
 
     pasosReales.forEach((paso, idx) => {
+      const isHighlighted =
+        highlight !== null &&
+        paso.idProceso === highlight.idProceso &&
+        (highlight.idPlanta === null || paso.idPlanta === highlight.idPlanta);
+
       nodes.push({
         id: procIdNode(c.idComp, paso.idProceso),
         type: "process",
@@ -203,6 +220,7 @@ export function buildGraph(arbol: ArbolPT, expanded: Set<number>): BuildResult {
           totalPasos: pasosReales.length,
           reqPaso: paso.req_paso,
           wipEnPaso: paso.wip_en_paso,
+          highlighted: isHighlighted,
         },
       });
 

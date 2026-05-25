@@ -14,15 +14,23 @@ export function ProcessNode({ data }: Props) {
 
   // Tono mas ligero cuando el paso esta cubierto (req_paso=0).
   const cubierto = data.reqPaso <= 0;
-  const borderCls = cubierto
-    ? "border-status-covered/40"
-    : data.wipEnPaso > 0
-      ? "border-status-partial/50"
-      : "border-surface-border";
+  const borderCls = data.highlighted
+    ? "border-status-pt"
+    : cubierto
+      ? "border-status-covered/40"
+      : data.wipEnPaso > 0
+        ? "border-status-partial/50"
+        : "border-surface-border";
+
+  // Resaltado: ring azul + sombra mas marcada cuando el paso coincide con el
+  // drill-down activo desde el Resumen.
+  const highlightCls = data.highlighted
+    ? "ring-2 ring-status-pt/40 ring-offset-2 ring-offset-surface-muted shadow-card"
+    : "shadow-soft";
 
   return (
     <div
-      className={`rounded-lg shadow-soft bg-white border ${borderCls} overflow-hidden w-[180px]`}
+      className={`rounded-lg bg-white border ${borderCls} ${highlightCls} overflow-hidden w-[180px] transition-shadow`}
     >
       <Handle
         type="source"
@@ -35,8 +43,18 @@ export function ProcessNode({ data }: Props) {
         className="!w-2 !h-2 !bg-ink-subtle !border-0"
       />
 
-      <div className="px-2.5 py-1 border-b border-surface-border bg-surface-muted/60 flex items-center justify-between gap-2">
-        <span className="text-[10px] font-medium text-ink-subtle tabular-nums">
+      <div
+        className={`px-2.5 py-1 border-b flex items-center justify-between gap-2 ${
+          data.highlighted
+            ? "bg-status-pt/10 border-status-pt/30"
+            : "bg-surface-muted/60 border-surface-border"
+        }`}
+      >
+        <span
+          className={`text-[10px] font-medium tabular-nums ${
+            data.highlighted ? "text-status-pt" : "text-ink-subtle"
+          }`}
+        >
           Paso {data.ordenEnRuta}/{data.totalPasos}
         </span>
         {fmtPlanta(data.idPlanta) ? (
