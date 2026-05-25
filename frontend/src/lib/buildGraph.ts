@@ -50,6 +50,8 @@ export interface ComponentNodeData extends Record<string, unknown> {
   status: Status;
   expandable: boolean;
   expanded: boolean;
+  /** Total de piezas requeridas por ensamble del padre (suma de todas las aristas padre). */
+  cantPadre: number;
 }
 
 export interface ProcessNodeData extends Record<string, unknown> {
@@ -189,6 +191,7 @@ export function buildGraph(
         status: statusDeComponente(c, ultimoPasoReal),
         expandable: pasosReales.length > 0,
         expanded: expanded.has(c.idComp),
+        cantPadre: c.cantidad_ensamble_total,
       },
     });
   }
@@ -256,9 +259,6 @@ export function buildGraph(
         target: targetId,
         type: "smoothstep",
         animated: false,
-        label: arista.cantidad_ensamble !== 1 ? `×${arista.cantidad_ensamble}` : undefined,
-        labelStyle: { fontSize: 11, fill: "#64748b" },
-        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.85 },
         style: { stroke: "#cbd5e1", strokeWidth: 1.5 },
       });
     }

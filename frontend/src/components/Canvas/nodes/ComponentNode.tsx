@@ -109,7 +109,7 @@ export function ComponentNode({ data }: Props) {
         </div>
       </div>
 
-      <div className="px-3 py-2.5">
+      <div className="px-3 pt-2.5 pb-2">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="font-mono text-sm font-medium text-ink truncate">{data.clave}</div>
@@ -121,16 +121,21 @@ export function ComponentNode({ data }: Props) {
                 {data.descripcion}
               </div>
             ) : null}
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-semibold tabular-nums text-ink leading-none">
+                {fmtInt(valor)}
+              </span>
+              <span className="text-xs text-ink-muted">{subLabel}</span>
+            </div>
           </div>
           <PartThumbnail clave={data.clave} />
         </div>
 
-        <div className="mt-2 flex items-baseline gap-1.5">
-          <span className="text-2xl font-semibold tabular-nums text-ink leading-none">
-            {fmtInt(valor)}
-          </span>
-          <span className="text-xs text-ink-muted">{subLabel}</span>
-        </div>
+        {data.cantPadre > 1 ? (
+          <div className="flex justify-end mt-1">
+            <span className="text-[10px] text-ink-subtle tabular-nums">×{data.cantPadre}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
