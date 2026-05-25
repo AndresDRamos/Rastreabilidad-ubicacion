@@ -4,6 +4,9 @@
 -- Parametros:
 --   @idPT           int    PT raiz a explosionar
 --   @ventana_meses  int    Default 3 (techo de demanda, past-due incluido)
+--   @fecha_max      date   Opcional. Si se provee, recorta el techo a esa fecha
+--                          (past-due sigue incluido). El cutoff efectivo es
+--                          ISNULL(@fecha_max, @techo). Espejo de Q_listado.sql.
 --
 -- Result-sets:
 --   (1) DEMANDA     - una fila por (PT, Cliente, Ciudad) con piezas pendientes
@@ -13,8 +16,10 @@
 -- =============================================================================
 
 DECLARE @ventana_meses int = ISNULL(@ventana_meses, 3);
+DECLARE @fecha_max     date = @fecha_max;          -- NULL = sin filtro extra
 DECLARE @hoy           date = CAST(GETDATE() AS date);
 DECLARE @techo         date = DATEADD(MONTH, @ventana_meses, @hoy);
+DECLARE @cutoff        date = ISNULL(@fecha_max, @techo);
 
 
 -- (1) DEMANDA del PT en la ventana, agrupada por (Cliente, Ciudad) -------------
@@ -33,12 +38,12 @@ SELECT
                 THEN (d.Cantidad - ISNULL(d.Embarcado, 0)) ELSE 0 END) AS PiezasPastDue
 FROM
   EPS.dbo.tblDemandaEPS d
-  JOIN EPS.dbo.tblMaterial m  ON d.idMaterial = m.idMaterial
-  LEFT JOIN EPS.dbo.tblCliente c  ON d.idCliente = c.idCliente
+  JOIN EPS.dbo.tblMaterial m ON d.idMaterial = m.idMaterial
+  LEFT JOIN EPS.dbo.tblCliente c ON d.idCliente = c.idCliente
   LEFT JOIN EPS.dbo.tblCiudad  ci ON d.idCiudad  = ci.idCiudad
 WHERE d.bActivo    = 1
   AND d.idMaterial = @idPT
-  AND d.Fecha      <= @techo
+  AND d.Fecha      <= @cutoff
   AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
 GROUP BY d.idMaterial, m.ClaveMaterial, m.Descripcion,
          d.idCliente, c.NombreCliente, d.idCiudad, ci.Ciudad
@@ -144,13 +149,15 @@ WHERE e.bActiva           = 1
   FROM
     cteCompArbol)
   -- Excluir etiquetas ya remisionadas: aunque sigan bActiva=1, su presencia
-  -- en tblRemisionEtiquetaDetalle implica que ya estan comprometidas con un
+  -- en  EPS.dbo.vwEtiquetasEnRemision implica que ya estan comprometidas con un
   -- embarque y no son inventario disponible. Sin esto, el bloque "Embarques"
   -- queda inflado (~94% son etiquetas ya remisionadas).
   AND NOT EXISTS (
-        SELECT 1
-        FROM EPS.Produccion.tblRemisionEtiquetaDetalle red
-        WHERE red.idEtiqueta = e.idEtiqueta
+        SELECT
+    1
+  FROM
+    EPS.dbo.vwEtiquetasEnRemision red
+  WHERE red.idEtiqueta = e.idEtiqueta
   )
 GROUP BY e.idMaterial, e.idProcesoSiguiente, p.Nombre
 ORDER BY e.idMaterial, Piezas DESC;

@@ -32,15 +32,18 @@ export function CiudadMultiSelect() {
       .sort((a, b) => a.nombre.localeCompare(b.nombre, "es-MX"));
   }, [filas, clienteId]);
 
-  // Cuando cambia el cliente, quitar del filtro las ciudades que ya no aplican.
+  // Cuando cambia el cliente (o el universo de PTs), quitar del filtro las
+  // ciudades que ya no aplican. NO correr mientras filas esta cargando: en
+  // ese momento opciones=[] y borrariamos la seleccion del usuario.
   useEffect(() => {
+    if (!filas) return;
     if (ciudadIds.length === 0) return;
     const validIds = new Set(opciones.map((o) => o.id));
     const next = ciudadIds.filter((id) => validIds.has(id));
     if (next.length !== ciudadIds.length) {
       setFilter("ciudadIds", next);
     }
-  }, [opciones, ciudadIds, setFilter]);
+  }, [filas, opciones, ciudadIds, setFilter]);
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -67,6 +70,12 @@ export function CiudadMultiSelect() {
       : ciudadIds.length === 1
         ? opciones.find((o) => o.id === ciudadIds[0])?.nombre ?? "1 ciudad"
         : `${ciudadIds.length} ciudades`;
+
+  // Solo mostrar el selector cuando hay un cliente seleccionado Y ese cliente
+  // tiene mas de un destino. Sin cliente, no aparece. Mientras `filas` carga
+  // el componente queda montado para no perder la seleccion previa.
+  if (clienteId == null) return null;
+  if (filas && opciones.length <= 1) return null;
 
   function toggle(id: number) {
     if (ciudadIds.includes(id)) {

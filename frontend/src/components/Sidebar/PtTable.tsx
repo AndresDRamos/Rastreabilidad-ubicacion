@@ -20,7 +20,6 @@ export function PtTable() {
   const ventana = useUiStore((s) => s.ventana);
   const filters = useUiStore((s) => s.filters);
   const procesoFiltro = useUiStore((s) => s.procesoFiltro);
-  const setProcesoFiltro = useUiStore((s) => s.setProcesoFiltro);
 
   const { data: filas, isLoading, error } = usePts(ventana, filters.fechaMax);
   const { data: ptsEnProceso, isLoading: loadingProceso } = usePtsEnProceso(
@@ -81,14 +80,12 @@ export function PtTable() {
   const totales = useMemo(() => {
     let req = 0;
     let pastDue = 0;
-    let piezasProc = 0;
     for (const f of filasFiltradas) {
       req += f.PiezasPend;
       pastDue += f.PiezasPastDue;
-      piezasProc += piezasPorPt.get(f.idMaterial) ?? 0;
     }
-    return { req, pastDue, piezasProc };
-  }, [filasFiltradas, piezasPorPt]);
+    return { req, pastDue };
+  }, [filasFiltradas]);
 
   const totalPages = Math.max(1, Math.ceil(filasFiltradas.length / PAGE_SIZE));
 
@@ -114,73 +111,22 @@ export function PtTable() {
     );
   }
 
-  const showProcesoChip = procesoFiltro !== null;
-
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {showProcesoChip ? (
-        <div className="px-4 py-2 bg-status-pt/5 border-b border-surface-border flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-ink-muted shrink-0">Proceso:</span>
-            <span className="font-medium text-status-pt truncate">
-              {procesoFiltro!.nombre}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setProcesoFiltro(null)}
-            className="shrink-0 inline-flex items-center gap-1 text-status-pt hover:bg-status-pt/10 rounded px-1.5 py-0.5 transition"
-            aria-label="Quitar filtro de proceso"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="w-3 h-3"
-              aria-hidden="true"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-            quitar
-          </button>
-        </div>
-      ) : null}
-
       <div className="px-4 py-2 bg-surface-muted/80 backdrop-blur-sm border-b border-surface-border flex items-center justify-between gap-2 text-xs">
-        {showProcesoChip ? (
-          <>
-            <span className="text-sm font-semibold tabular-nums text-status-pt">
-              {fmtInt(totales.piezasProc)}{" "}
-              <span className="text-[10px] font-normal text-ink-subtle">
-                pzs en proceso
-              </span>
-            </span>
-            <span className="text-ink-subtle tabular-nums">
-              {fmtInt(filasFiltradas.length)} PTs
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="text-sm font-semibold tabular-nums text-ink">
-              {fmtInt(totales.req)}
-            </span>
-            {totales.pastDue > 0 ? (
-              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums bg-status-empty/10 text-status-empty">
-                {fmtInt(totales.pastDue)} past-due
-              </span>
-            ) : null}
-          </>
-        )}
+        <span className="text-sm font-semibold tabular-nums text-ink">
+          {fmtInt(totales.req)}
+        </span>
+        {totales.pastDue > 0 ? (
+          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums bg-status-empty/10 text-status-empty">
+            {fmtInt(totales.pastDue)} past-due
+          </span>
+        ) : null}
       </div>
 
       {filasFiltradas.length === 0 ? (
         <div className="px-4 py-6 text-sm text-ink-muted">
-          {showProcesoChip && loadingProceso
+          {procesoFiltro !== null && loadingProceso
             ? "Cargando PTs del proceso..."
             : "Sin resultados con los filtros actuales."}
         </div>

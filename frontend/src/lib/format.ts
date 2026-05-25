@@ -9,3 +9,9 @@ export function fmtNum(n: number): string {
   if (Math.abs(n - Math.round(n)) < 1e-6) return intFmt.format(Math.round(n));
   return decFmt.format(n);
 }
+
+export function fmtPlanta(idPlanta: number | null | undefined): string | null {
+  if (idPlanta == null) return null;
+  if (idPlanta === 5) return "Externo";
+  return `Planta ${idPlanta}`;
+}

@@ -6,6 +6,7 @@ toggle Inventario/Requerimiento del frontend es re-render puro, sin refetch.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 import pyodbc
@@ -24,10 +25,18 @@ router = APIRouter(prefix="/api", tags=["arbol"])
 def get_arbol(
     idPt: int,
     ventana: Annotated[int, Query(ge=1, le=24)] = 3,
+    fecha_max: Annotated[date | None, Query()] = None,
     conn: pyodbc.Connection = Depends(get_conn),
     settings: Settings = Depends(get_settings),
 ) -> ArbolPT:
+    fecha_max_iso = fecha_max.isoformat() if fecha_max else None
     try:
-        return armar_arbol(conn, idPt=idPt, ventana_meses=ventana, settings=settings)
+        return armar_arbol(
+            conn,
+            idPt=idPt,
+            ventana_meses=ventana,
+            settings=settings,
+            fecha_max=fecha_max_iso,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

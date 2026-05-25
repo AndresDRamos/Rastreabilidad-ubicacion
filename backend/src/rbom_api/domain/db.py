@@ -44,18 +44,24 @@ def fetch_listado(conn: pyodbc.Connection,
     cursor.close()
     return rows
 
-
 def fetch_detalle(conn: pyodbc.Connection, idPT: int,
-                  ventana_meses: int = 3) -> tuple[
+                  ventana_meses: int = 3,
+                  fecha_max: str | None = None) -> tuple[
                       list[dict[str, Any]],  # DEMANDA
                       list[dict[str, Any]],  # BOM
                       list[dict[str, Any]],  # RUTA
                       list[dict[str, Any]],  # WIP
                   ]:
     sql = _leer_sql("Q_detalle.sql")
+    if fecha_max:
+        # fecha_max viene validada como ISO yyyy-mm-dd desde el router (date).
+        fecha_decl = f"DECLARE @fecha_max date = '{fecha_max}';\n"
+    else:
+        fecha_decl = "DECLARE @fecha_max date = NULL;\n"
     sql_param = (
         f"DECLARE @idPT int = {int(idPT)};\n"
         f"DECLARE @ventana_meses int = {int(ventana_meses)};\n"
+        + fecha_decl
     ) + _strip_param_declarations(sql)
 
     cursor = conn.cursor()

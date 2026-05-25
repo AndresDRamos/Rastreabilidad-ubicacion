@@ -40,3 +40,6 @@ logs/
 .coverage
 htmlcov/
 coverage.xml
+
+# Dev PID files
+.dev-pids.txt
