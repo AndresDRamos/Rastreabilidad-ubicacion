@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "./client";
-import type { ArbolPT, FilaListado } from "./types";
+import type {
+  ArbolPT,
+  BloqueProceso,
+  FilaListado,
+  Planta,
+  PTEnProceso,
+} from "./types";
 
 export function usePts(ventana: number = 3, fechaMax: string = "") {
   const fechaMaxParam = fechaMax || undefined;
@@ -30,5 +36,70 @@ export function useArbol(idPt: number | null, ventana: number = 3) {
     // Cache infinito durante la sesion: un PT pesado solo se descarga una vez.
     staleTime: Infinity,
     gcTime: Infinity,
+  });
+}
+
+function ciudadesCsv(ids: number[] | undefined): string | undefined {
+  if (!ids || ids.length === 0) return undefined;
+  return ids.join(",");
+}
+
+export function useBloques(
+  cliente: number | null = null,
+  planta: number | null = null,
+  ciudadIds: number[] = [],
+) {
+  const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
+  return useQuery<BloqueProceso[]>({
+    queryKey: ["bloques", cliente, planta, ciudadesKey],
+    queryFn: async () => {
+      const params: Record<string, string | number> = {};
+      if (cliente != null) params.cliente = cliente;
+      if (planta != null) params.planta = planta;
+      const ciud = ciudadesCsv(ciudadIds);
+      if (ciud) params.ciudades = ciud;
+      const { data } = await apiClient.get<BloqueProceso[]>("/bloques", {
+        params,
+      });
+      return data;
+    },
+    staleTime: 2 * 60 * 1000, // 2 min — coincide con TTL del backend
+  });
+}
+
+export function usePtsEnProceso(
+  idProceso: number | null,
+  cliente: number | null = null,
+  planta: number | null = null,
+  ciudadIds: number[] = [],
+) {
+  const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
+  return useQuery<PTEnProceso[]>({
+    queryKey: ["pts-en-proceso", idProceso, cliente, planta, ciudadesKey],
+    enabled: idProceso !== null,
+    queryFn: async () => {
+      const params: Record<string, string | number> = {};
+      if (cliente != null) params.cliente = cliente;
+      if (planta != null) params.planta = planta;
+      const ciud = ciudadesCsv(ciudadIds);
+      if (ciud) params.ciudades = ciud;
+      const { data } = await apiClient.get<PTEnProceso[]>(
+        `/bloques/${idProceso}/pts`,
+        { params },
+      );
+      return data;
+    },
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function usePlantas() {
+  return useQuery<Planta[]>({
+    queryKey: ["plantas"],
+    queryFn: async () => {
+      const { data } = await apiClient.get<Planta[]>("/plantas");
+      return data;
+    },
+    staleTime: 10 * 60 * 1000, // las plantas no cambian seguido
   });
 }
