@@ -73,6 +73,8 @@ export interface ProcessNodeData extends Record<string, unknown> {
 export interface HighlightFiltro {
   idProceso: number;
   idPlanta: number | null;
+  /** Si esta lista esta vacia o ausente, no filtra por tipo. Tipos: 1=PT, 3=Intermedio. */
+  idsTipoMaterial?: number[];
 }
 
 export type ArbolNode =
@@ -203,10 +205,14 @@ export function buildGraph(
     if (pasosReales.length === 0) continue;
 
     pasosReales.forEach((paso, idx) => {
+      const tiposFiltro = highlight?.idsTipoMaterial ?? [];
+      const matchTipo =
+        tiposFiltro.length === 0 || tiposFiltro.includes(c.tipo_material);
       const isHighlighted =
         highlight !== null &&
         paso.idProceso === highlight.idProceso &&
-        (highlight.idPlanta === null || paso.idPlanta === highlight.idPlanta);
+        (highlight.idPlanta === null || paso.idPlanta === highlight.idPlanta) &&
+        matchTipo;
 
       nodes.push({
         id: procIdNode(c.idComp, paso.idProceso),

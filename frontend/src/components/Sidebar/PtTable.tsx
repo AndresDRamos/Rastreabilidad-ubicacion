@@ -27,6 +27,7 @@ export function PtTable() {
     filters.clienteId,
     filters.plantaId,
     filters.ciudadIds,
+    filters.tipoMaterialIds,
   );
 
   const selectedPtIds = useUiStore((s) => s.selectedPtIds);

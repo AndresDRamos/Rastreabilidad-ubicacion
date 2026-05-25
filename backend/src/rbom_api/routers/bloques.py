@@ -29,9 +29,13 @@ log = structlog.get_logger("rbom_api.routers.bloques")
 
 
 # Cache compartido entre requests. Keys incluyen filtros para no devolver
-# datos cruzados entre clientes/plantas/ciudades distintas.
-_CacheKeyBloques = tuple[int | None, int | None, tuple[int, ...]]
-_CacheKeyPts = tuple[int, int | None, int | None, tuple[int, ...]]
+# datos cruzados entre clientes/plantas/ciudades/tipos de material distintos.
+_CacheKeyBloques = tuple[
+    int | None, int | None, tuple[int, ...], tuple[int, ...]
+]
+_CacheKeyPts = tuple[
+    int, int | None, int | None, tuple[int, ...], tuple[int, ...]
+]
 
 _cache_bloques: TTLCache[_CacheKeyBloques, list[BloqueProceso]] = TTLCache(
     maxsize=128, ttl=120
@@ -43,7 +47,7 @@ _cache_plantas: TTLCache[str, list[Planta]] = TTLCache(maxsize=1, ttl=600)
 _lock = threading.Lock()
 
 
-def _parse_ciudades_csv(raw: str | None) -> list[int]:
+def _parse_int_csv(raw: str | None) -> list[int]:
     """Acepta 'a,b,c' y devuelve [int]. Ignora vacios y valores invalidos."""
     if not raw:
         return []
@@ -59,15 +63,29 @@ def _parse_ciudades_csv(raw: str | None) -> list[int]:
     return out
 
 
+# Alias retrocompatible para no romper imports/llamadas existentes.
+_parse_ciudades_csv = _parse_int_csv
+
+
 @router.get("/bloques", response_model=list[BloqueProceso])
 def get_bloques(
     cliente: Annotated[int | None, Query(ge=1)] = None,
     planta: Annotated[int | None, Query(ge=1)] = None,
     ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
+    tipos_material: Annotated[
+        str | None,
+        Query(description="CSV de idTipoMaterial (PT=1, Intermedio=3)"),
+    ] = None,
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[BloqueProceso]:
-    ids_ciudad = _parse_ciudades_csv(ciudades)
-    key: _CacheKeyBloques = (cliente, planta, tuple(sorted(ids_ciudad)))
+    ids_ciudad = _parse_int_csv(ciudades)
+    ids_tipo = _parse_int_csv(tipos_material)
+    key: _CacheKeyBloques = (
+        cliente,
+        planta,
+        tuple(sorted(ids_ciudad)),
+        tuple(sorted(ids_tipo)),
+    )
     with _lock:
         cached = _cache_bloques.get(key)
     if cached is not None:
@@ -79,6 +97,7 @@ def get_bloques(
         id_cliente=cliente,
         id_planta=planta,
         ids_ciudad=ids_ciudad or None,
+        ids_tipo_material=ids_tipo or None,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
@@ -87,6 +106,7 @@ def get_bloques(
         cliente=cliente,
         planta=planta,
         ciudades=ids_ciudad,
+        tipos_material=ids_tipo,
         rows=len(rows),
         duration_ms=round(elapsed_ms, 2),
     )
@@ -102,10 +122,21 @@ def get_pts_en_proceso(
     cliente: Annotated[int | None, Query(ge=1)] = None,
     planta: Annotated[int | None, Query(ge=1)] = None,
     ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
+    tipos_material: Annotated[
+        str | None,
+        Query(description="CSV de idTipoMaterial (PT=1, Intermedio=3)"),
+    ] = None,
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[PTEnProceso]:
-    ids_ciudad = _parse_ciudades_csv(ciudades)
-    key: _CacheKeyPts = (idProceso, cliente, planta, tuple(sorted(ids_ciudad)))
+    ids_ciudad = _parse_int_csv(ciudades)
+    ids_tipo = _parse_int_csv(tipos_material)
+    key: _CacheKeyPts = (
+        idProceso,
+        cliente,
+        planta,
+        tuple(sorted(ids_ciudad)),
+        tuple(sorted(ids_tipo)),
+    )
     with _lock:
         cached = _cache_pts.get(key)
     if cached is not None:
@@ -118,6 +149,7 @@ def get_pts_en_proceso(
         id_cliente=cliente,
         id_planta=planta,
         ids_ciudad=ids_ciudad or None,
+        ids_tipo_material=ids_tipo or None,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
@@ -127,6 +159,7 @@ def get_pts_en_proceso(
         cliente=cliente,
         planta=planta,
         ciudades=ids_ciudad,
+        tipos_material=ids_tipo,
         rows=len(rows),
         duration_ms=round(elapsed_ms, 2),
     )

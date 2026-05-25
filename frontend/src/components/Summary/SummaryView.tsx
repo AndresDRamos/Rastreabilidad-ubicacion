@@ -4,16 +4,19 @@ import { useBloques, usePlantas } from "@/api/queries";
 import type { BloqueProceso } from "@/api/types";
 import { fmtInt } from "@/lib/format";
 import { useUiStore } from "@/store/useUiStore";
+import { TipoMaterialSelect } from "./TipoMaterialSelect";
 
 export function SummaryView() {
   const clienteId = useUiStore((s) => s.filters.clienteId);
   const plantaId = useUiStore((s) => s.filters.plantaId);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
+  const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
   const setFilter = useUiStore((s) => s.setFilter);
   const { data: bloques, isLoading, error, isFetching } = useBloques(
     clienteId,
     plantaId,
     ciudadIds,
+    tipoMaterialIds,
   );
   const procesoFiltro = useUiStore((s) => s.procesoFiltro);
   const setProcesoFiltro = useUiStore((s) => s.setProcesoFiltro);
@@ -50,6 +53,10 @@ export function SummaryView() {
           <PlantaSelect
             value={plantaId}
             onChange={(v) => setFilter("plantaId", v)}
+          />
+          <TipoMaterialSelect
+            value={tipoMaterialIds}
+            onChange={(v) => setFilter("tipoMaterialIds", v)}
           />
           {clienteId !== null ? (
             <FilterChip
