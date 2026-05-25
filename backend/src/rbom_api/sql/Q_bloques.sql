@@ -15,6 +15,11 @@
 --                           El placeholder /*CIUDADES_FILTER*/ se reemplaza en
 --                           Python por "AND d.idCiudad IN (...)" si hay
 --                           ciudades, "" en caso contrario.
+--
+-- Placeholders adicionales reemplazados desde Python:
+--   /*TIPOMAT_FILTER*/  Si el usuario selecciono tipos de material (PT=1,
+--                       Intermedio=3), se reemplaza por
+--                       "AND m.idTipoMaterial IN (...)"; vacio = sin filtro.
 -- =============================================================================
 
 DECLARE @idCliente         int = @idCliente;
@@ -58,9 +63,11 @@ WITH
             ,e.cantidad
         FROM
             EPS.Produccion.tblEtiqueta e
+            JOIN EPS.dbo.tblMaterial m ON e.idMaterial = m.idMaterial
         WHERE e.bActiva           = 1
             AND e.idEstatusEtiqueta = 2 -- LIBERADO
             AND e.idTipoEtiqueta    = 3 -- LIBERACION
+            /*TIPOMAT_FILTER*/
             AND NOT EXISTS (
             SELECT
                 1

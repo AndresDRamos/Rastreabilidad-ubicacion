@@ -11,6 +11,11 @@
 --   @idProcesoSelected int   Obligatorio
 --   @idCliente         int?  Default NULL (sin filtro de cliente)
 --   @idPlantaFiltro    int?  Default NULL (sin filtro de planta)
+--
+-- Placeholders reemplazados desde Python:
+--   /*CIUDADES_FILTER*/ "AND d.idCiudad IN (...)" si hay ciudades, "" si no.
+--   /*TIPOMAT_FILTER*/  "AND m.idTipoMaterial IN (...)" si el usuario filtra
+--                       por tipos (PT=1, Intermedio=3); vacio = sin filtro.
 -- =============================================================================
 
 DECLARE @idProcesoSelected int = @idProcesoSelected;
@@ -53,10 +58,12 @@ WITH
             ,COUNT(*)          AS Etiquetas
         FROM
             EPS.Produccion.tblEtiqueta e
+            JOIN EPS.dbo.tblMaterial m ON e.idMaterial = m.idMaterial
         WHERE e.bActiva            = 1
             AND e.idEstatusEtiqueta  = 2
             AND e.idTipoEtiqueta     = 3
             AND e.idProcesoSiguiente = @idProcesoSelected
+            /*TIPOMAT_FILTER*/
             AND NOT EXISTS (
             SELECT
                 1

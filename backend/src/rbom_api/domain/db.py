@@ -97,13 +97,26 @@ def _ciudades_predicate(ids: list[int] | None) -> str:
     return f"AND d.idCiudad IN ({csv})"
 
 
+def _tipomat_predicate(ids: list[int] | None) -> str:
+    """Predicado SQL para /*TIPOMAT_FILTER*/.
+
+    Filtra por m.idTipoMaterial (alias `m` = tblMaterial JOINed en el CTE de
+    WIP). Lista vacia o None = sin filtro."""
+    if not ids:
+        return ""
+    csv = ",".join(str(int(x)) for x in ids)
+    return f"AND m.idTipoMaterial IN ({csv})"
+
+
 def fetch_bloques(conn: pyodbc.Connection,
                   id_cliente: int | None = None,
                   id_planta: int | None = None,
-                  ids_ciudad: list[int] | None = None) -> list[dict[str, Any]]:
+                  ids_ciudad: list[int] | None = None,
+                  ids_tipo_material: list[int] | None = None) -> list[dict[str, Any]]:
     """Lee Q_bloques.sql — bloques agregados por idProcesoSiguiente."""
     sql = _leer_sql("Q_bloques.sql")
     sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
     con_filtro = 1 if (id_cliente is not None or ids_ciudad) else 0
     sql_param = (
         _decl_int("idCliente", id_cliente)
@@ -121,10 +134,12 @@ def fetch_pts_en_proceso(conn: pyodbc.Connection,
                          id_proceso: int,
                          id_cliente: int | None = None,
                          id_planta: int | None = None,
-                         ids_ciudad: list[int] | None = None) -> list[dict[str, Any]]:
+                         ids_ciudad: list[int] | None = None,
+                         ids_tipo_material: list[int] | None = None) -> list[dict[str, Any]]:
     """Lee Q_pts_en_proceso.sql — PTs cuyos componentes esperan @id_proceso."""
     sql = _leer_sql("Q_pts_en_proceso.sql")
     sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
     sql_param = (
         _decl_int("idProcesoSelected", id_proceso)
         + _decl_int("idCliente", id_cliente)

@@ -3,11 +3,12 @@ import { create } from "zustand";
 import type { Mode } from "@/api/types";
 
 export interface UiFilters {
-  clienteId: number | null; // null = sin filtro (todos los clientes)
-  ciudadIds: number[];      // [] = todas las ciudades. Multi-select.
-  pt: string;               // busqueda parcial client-side
-  fechaMax: string;         // ISO yyyy-mm-dd; "" = sin filtro
-  plantaId: number | null;  // null = todas las plantas
+  clienteId: number | null;    // null = sin filtro (todos los clientes)
+  ciudadIds: number[];         // [] = todas las ciudades. Multi-select.
+  pt: string;                  // busqueda parcial client-side
+  fechaMax: string;            // ISO yyyy-mm-dd; "" = sin filtro
+  plantaId: number | null;     // null = todas las plantas
+  tipoMaterialIds: number[];   // [] = sin filtro (PT + Intermedio). PT=1, Intermedio=3.
 }
 
 export interface ProcesoFiltro {
@@ -62,7 +63,14 @@ export const useUiStore = create<UiStore>((set) => ({
 
   mode: "inventario",
   expanded: new Set(),
-  filters: { clienteId: null, ciudadIds: [], pt: "", fechaMax: "", plantaId: null },
+  filters: {
+    clienteId: null,
+    ciudadIds: [],
+    pt: "",
+    fechaMax: "",
+    plantaId: null,
+    tipoMaterialIds: [],
+  },
 
   showSummary: () => set({ view: "summary", activeTabId: null }),
 

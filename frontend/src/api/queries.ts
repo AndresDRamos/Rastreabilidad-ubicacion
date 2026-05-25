@@ -45,25 +45,32 @@ export function useArbol(
   });
 }
 
-function ciudadesCsv(ids: number[] | undefined): string | undefined {
+function idsCsv(ids: number[] | undefined): string | undefined {
   if (!ids || ids.length === 0) return undefined;
   return ids.join(",");
 }
+
+// Alias retro-compatible
+const ciudadesCsv = idsCsv;
 
 export function useBloques(
   cliente: number | null = null,
   planta: number | null = null,
   ciudadIds: number[] = [],
+  tipoMaterialIds: number[] = [],
 ) {
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
+  const tiposKey = idsCsv(tipoMaterialIds) ?? "";
   return useQuery<BloqueProceso[]>({
-    queryKey: ["bloques", cliente, planta, ciudadesKey],
+    queryKey: ["bloques", cliente, planta, ciudadesKey, tiposKey],
     queryFn: async () => {
       const params: Record<string, string | number> = {};
       if (cliente != null) params.cliente = cliente;
       if (planta != null) params.planta = planta;
       const ciud = ciudadesCsv(ciudadIds);
       if (ciud) params.ciudades = ciud;
+      const tipos = idsCsv(tipoMaterialIds);
+      if (tipos) params.tipos_material = tipos;
       const { data } = await apiClient.get<BloqueProceso[]>("/bloques", {
         params,
       });
@@ -78,10 +85,19 @@ export function usePtsEnProceso(
   cliente: number | null = null,
   planta: number | null = null,
   ciudadIds: number[] = [],
+  tipoMaterialIds: number[] = [],
 ) {
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
+  const tiposKey = idsCsv(tipoMaterialIds) ?? "";
   return useQuery<PTEnProceso[]>({
-    queryKey: ["pts-en-proceso", idProceso, cliente, planta, ciudadesKey],
+    queryKey: [
+      "pts-en-proceso",
+      idProceso,
+      cliente,
+      planta,
+      ciudadesKey,
+      tiposKey,
+    ],
     enabled: idProceso !== null,
     queryFn: async () => {
       const params: Record<string, string | number> = {};
@@ -89,6 +105,8 @@ export function usePtsEnProceso(
       if (planta != null) params.planta = planta;
       const ciud = ciudadesCsv(ciudadIds);
       if (ciud) params.ciudades = ciud;
+      const tipos = idsCsv(tipoMaterialIds);
+      if (tipos) params.tipos_material = tipos;
       const { data } = await apiClient.get<PTEnProceso[]>(
         `/bloques/${idProceso}/pts`,
         { params },

@@ -38,6 +38,7 @@ function ArbolCanvasInner({ idPt }: Props) {
   const ventana = useUiStore((s) => s.ventana);
   const fechaMax = useUiStore((s) => s.filters.fechaMax);
   const plantaId = useUiStore((s) => s.filters.plantaId);
+  const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
   const expanded = useUiStore((s) => s.expanded);
   const toggleExpanded = useUiStore((s) => s.toggleExpanded);
   const setExpanded = useUiStore((s) => s.setExpanded);
@@ -45,12 +46,16 @@ function ArbolCanvasInner({ idPt }: Props) {
   const { data, isLoading, error } = useArbol(idPt, ventana, fechaMax);
 
   // Drill-down activo desde el Resumen. Si esta seteado, marca los
-  // ProcessNode que matchean (idProceso + idPlanta) y dispara la
-  // auto-expansion de los componentes que los contienen.
+  // ProcessNode que matchean (idProceso + idPlanta + tipo material) y
+  // dispara la auto-expansion de los componentes que los contienen.
   const highlight = useMemo<HighlightFiltro | null>(() => {
     if (!procesoFiltro) return null;
-    return { idProceso: procesoFiltro.idProceso, idPlanta: plantaId };
-  }, [procesoFiltro, plantaId]);
+    return {
+      idProceso: procesoFiltro.idProceso,
+      idPlanta: plantaId,
+      idsTipoMaterial: tipoMaterialIds,
+    };
+  }, [procesoFiltro, plantaId, tipoMaterialIds]);
 
   const expandableIds = useMemo<number[]>(() => {
     if (!data) return [];
@@ -61,10 +66,12 @@ function ArbolCanvasInner({ idPt }: Props) {
 
   // Componentes cuyos pasos reales matchean el filtro de drill-down.
   // Se usa para auto-expandir solo la primera vez que se entra a una
-  // combinacion (idPt, idProceso, idPlanta).
+  // combinacion (idPt, idProceso, idPlanta, tipos).
   const idsAExpandir = useMemo<number[]>(() => {
     if (!data || !highlight) return [];
+    const tipos = highlight.idsTipoMaterial ?? [];
     return data.componentes
+      .filter((c) => tipos.length === 0 || tipos.includes(c.tipo_material))
       .filter((c) =>
         c.ruta.some(
           (p) =>
@@ -82,7 +89,8 @@ function ArbolCanvasInner({ idPt }: Props) {
   const autoExpandedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!data || !highlight || idsAExpandir.length === 0) return;
-    const key = `${idPt}|${highlight.idProceso}|${highlight.idPlanta ?? "x"}`;
+    const tiposKey = (highlight.idsTipoMaterial ?? []).slice().sort().join(",");
+    const key = `${idPt}|${highlight.idProceso}|${highlight.idPlanta ?? "x"}|${tiposKey}`;
     if (autoExpandedKeyRef.current === key) return;
     autoExpandedKeyRef.current = key;
     // Union: preservar lo que el usuario ya tenia expandido.
