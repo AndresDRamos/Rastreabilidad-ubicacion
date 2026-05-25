@@ -60,7 +60,7 @@ export const useUiStore = create<UiStore>((set) => ({
   ventana: 3,
   procesoFiltro: null,
 
-  mode: "requerimiento",
+  mode: "inventario",
   expanded: new Set(),
   filters: { clienteId: null, ciudadIds: [], pt: "", fechaMax: "", plantaId: null },
 
