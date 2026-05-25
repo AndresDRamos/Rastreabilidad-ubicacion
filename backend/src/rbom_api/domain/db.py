@@ -74,16 +74,87 @@ def fetch_detalle(conn: pyodbc.Connection, idPT: int,
     return result_sets[0], result_sets[1], result_sets[2], result_sets[3]
 
 
+def _decl_int(name: str, value: int | None) -> str:
+    if value is None:
+        return f"DECLARE @{name} int = NULL;\n"
+    return f"DECLARE @{name} int = {int(value)};\n"
+
+
+def _ciudades_predicate(ids: list[int] | None) -> str:
+    """Devuelve el predicado SQL a injectar en /*CIUDADES_FILTER*/.
+
+    Valida cada id como int para evitar SQL injection. Lista vacia o None
+    devuelve "" (no se filtra por ciudad)."""
+    if not ids:
+        return ""
+    csv = ",".join(str(int(x)) for x in ids)
+    return f"AND d.idCiudad IN ({csv})"
+
+
+def fetch_bloques(conn: pyodbc.Connection,
+                  id_cliente: int | None = None,
+                  id_planta: int | None = None,
+                  ids_ciudad: list[int] | None = None) -> list[dict[str, Any]]:
+    """Lee Q_bloques.sql — bloques agregados por idProcesoSiguiente."""
+    sql = _leer_sql("Q_bloques.sql")
+    sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    con_filtro = 1 if (id_cliente is not None or ids_ciudad) else 0
+    sql_param = (
+        _decl_int("idCliente", id_cliente)
+        + _decl_int("idPlantaFiltro", id_planta)
+        + f"DECLARE @conFiltroUniverso bit = {con_filtro};\n"
+    ) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
+def fetch_pts_en_proceso(conn: pyodbc.Connection,
+                         id_proceso: int,
+                         id_cliente: int | None = None,
+                         id_planta: int | None = None,
+                         ids_ciudad: list[int] | None = None) -> list[dict[str, Any]]:
+    """Lee Q_pts_en_proceso.sql — PTs cuyos componentes esperan @id_proceso."""
+    sql = _leer_sql("Q_pts_en_proceso.sql")
+    sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    sql_param = (
+        _decl_int("idProcesoSelected", id_proceso)
+        + _decl_int("idCliente", id_cliente)
+        + _decl_int("idPlantaFiltro", id_planta)
+    ) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
+def fetch_plantas(conn: pyodbc.Connection) -> list[dict[str, Any]]:
+    """Lee Q_plantas.sql — lista de plantas con WIP activo."""
+    sql = _leer_sql("Q_plantas.sql")
+    cursor = conn.cursor()
+    cursor.execute(sql)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
 def _strip_param_declarations(sql: str) -> str:
-    """Quita los DECLARE @ventana_meses / @idPT del SQL para evitar
-    redeclaraciones, manteniendo el uso de las variables en el batch."""
+    """Quita los DECLARE @... del SQL para evitar redeclaraciones,
+    manteniendo el uso de las variables en el batch."""
     lines = sql.splitlines()
     keep = []
     for line in lines:
         stripped = line.strip().lower()
         if stripped.startswith("declare @ventana_meses") \
            or stripped.startswith("declare @idpt") \
-           or stripped.startswith("declare @fecha_max"):
+           or stripped.startswith("declare @fecha_max") \
+           or stripped.startswith("declare @idplantafiltro") \
+           or stripped.startswith("declare @idprocesoselected") \
+           or stripped.startswith("declare @idcliente") \
+           or stripped.startswith("declare @confiltrouniverso"):
             continue
         keep.append(line)
     return "\n".join(keep)

@@ -1,4 +1,6 @@
 import { useUiStore } from "@/store/useUiStore";
+import { CiudadMultiSelect } from "./CiudadMultiSelect";
+import { ClienteCombobox } from "./ClienteCombobox";
 
 export function FiltersHeader() {
   const filters = useUiStore((s) => s.filters);
@@ -6,18 +8,8 @@ export function FiltersHeader() {
 
   return (
     <div className="px-4 pt-4 pb-3 space-y-2 border-b border-surface-border">
-      <div className="grid grid-cols-2 gap-2">
-        <Input
-          placeholder="Cliente"
-          value={filters.cliente}
-          onChange={(v) => setFilter("cliente", v)}
-        />
-        <Input
-          placeholder="Ciudad"
-          value={filters.ciudad}
-          onChange={(v) => setFilter("ciudad", v)}
-        />
-      </div>
+      <ClienteCombobox />
+      <CiudadMultiSelect />
       <Input
         placeholder="Numero de parte"
         value={filters.pt}

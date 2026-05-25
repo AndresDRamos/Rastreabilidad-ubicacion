@@ -73,3 +73,28 @@ export interface ArbolPT {
 }
 
 export type Mode = "inventario" | "requerimiento";
+
+// ---------- Vista Resumen ---------------------------------------------------
+
+export interface BloqueProceso {
+  idProceso: number | null;
+  Proceso: string;
+  Etiquetas: number;
+  Piezas: number;
+  Componentes: number;
+  Plantas: number;
+}
+
+export interface PTEnProceso {
+  idPT: number;
+  PT: string;
+  DescripcionPT: string | null;
+  ComponentesEnProceso: number;
+  PiezasEnProceso: number;
+  EtiquetasEnProceso: number;
+}
+
+export interface Planta {
+  idPlanta: number;
+  NombrePlanta: string;
+}

@@ -4,12 +4,26 @@
 # Uso:
 #   .\scripts\dev-up.ps1            # arranca
 #   .\scripts\dev-down.ps1          # para los procesos
+#
+# Notas sobre el reloader de uvicorn (Windows):
+#   - Limpiamos __pycache__ antes de arrancar. Si dev-down dejo un worker
+#     huerfano (uvicorn forkea un child cuando corre con --reload), su
+#     bytecode obsoleto puede colarse al siguiente arranque y servir un
+#     SQL/modulo viejo (ej. variables @ no declaradas que si estan en el
+#     archivo actual). Limpiar __pycache__ obliga a Python a recompilar
+#     desde la fuente actual.
+#   - Acotamos --reload-dir a src/rbom_api para que el watcher no tenga que
+#     escanear .venv, static/, ni __pycache__. Sin esto el watcher se
+#     atrasa en Windows y a veces pierde el evento de cambio.
+#   - --reload-include limita a .py: cambios en .sql no requieren restart
+#     porque los archivos SQL se leen en cada request (no hay cache).
 
 $ErrorActionPreference = "Stop"
 
 $root      = Split-Path -Parent $PSScriptRoot
 $pythonExe = Join-Path $root "backend\.venv\Scripts\python.exe"
 $envFile   = Join-Path $root "backend\.env"
+$backendDir = Join-Path $root "backend"
 
 if (-not (Test-Path $pythonExe)) { throw "Falta el venv en backend\.venv. Crealo primero." }
 if (-not (Test-Path $envFile))   { Write-Warning "backend\.env no existe — el backend arrancara con defaults." }
@@ -18,9 +32,22 @@ if (-not (Test-Path $envFile))   { Write-Warning "backend\.env no existe — el 
 $logsDir = Join-Path $root "logs"
 if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
 
+# Limpiar bytecode obsoleto antes de arrancar — ver nota al inicio del archivo.
+$srcDir = Join-Path $backendDir "src"
+if (Test-Path $srcDir) {
+    Get-ChildItem -Path $srcDir -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $be = Start-Process -FilePath $pythonExe `
-    -ArgumentList "-m","uvicorn","rbom_api.main:app","--host","127.0.0.1","--port","8000","--reload" `
-    -WorkingDirectory (Join-Path $root "backend") `
+    -ArgumentList @(
+        "-m","uvicorn","rbom_api.main:app",
+        "--host","127.0.0.1","--port","8000",
+        "--reload",
+        "--reload-dir","src/rbom_api",
+        "--reload-include","*.py"
+    ) `
+    -WorkingDirectory $backendDir `
     -RedirectStandardOutput (Join-Path $root "logs\dev-backend.out") `
     -RedirectStandardError  (Join-Path $root "logs\dev-backend.err") `
     -NoNewWindow -PassThru

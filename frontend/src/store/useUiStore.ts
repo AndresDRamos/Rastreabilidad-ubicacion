@@ -3,17 +3,36 @@ import { create } from "zustand";
 import type { Mode } from "@/api/types";
 
 export interface UiFilters {
-  cliente: string;
-  ciudad: string;
-  pt: string;
-  fechaMax: string; // ISO yyyy-mm-dd; "" = sin filtro
+  clienteId: number | null; // null = sin filtro (todos los clientes)
+  ciudadIds: number[];      // [] = todas las ciudades. Multi-select.
+  pt: string;               // busqueda parcial client-side
+  fechaMax: string;         // ISO yyyy-mm-dd; "" = sin filtro
+  plantaId: number | null;  // null = todas las plantas
 }
 
+export interface ProcesoFiltro {
+  idProceso: number;
+  nombre: string;
+}
+
+/**
+ * Vista activa:
+ *   "summary" — pestaña fija "Resumen" con bloques por proceso
+ *   "tree"    — un PT abierto (activeTabId) con su arbol netteado
+ */
+export type ViewKind = "summary" | "tree";
+
 interface UiStore {
+  // Vista activa (tab fija "Resumen" o un PT)
+  view: ViewKind;
+
   // Tabs / seleccion
   selectedPtIds: number[];           // orden = orden de tabs
   activeTabId: number | null;
   ventana: number;                   // meses de ventana (default 3)
+
+  // Filtro por proceso (drill-down desde Resumen). null = sin filtro.
+  procesoFiltro: ProcesoFiltro | null;
 
   // Modo de visualizacion y filtros del sidebar (client-side)
   mode: Mode;
@@ -21,25 +40,31 @@ interface UiStore {
   filters: UiFilters;
 
   // Mutadores
+  showSummary: () => void;
   togglePt: (idPt: number) => void;
   closeTab: (idPt: number) => void;
   setActiveTab: (idPt: number | null) => void;
   setMode: (mode: Mode) => void;
   toggleExpanded: (idComp: number) => void;
   setExpanded: (ids: Iterable<number>) => void;
-  setFilter: (key: keyof UiFilters, value: string) => void;
+  setFilter: <K extends keyof UiFilters>(key: K, value: UiFilters[K]) => void;
   setVentana: (v: number) => void;
+  setProcesoFiltro: (p: ProcesoFiltro | null) => void;
   clearSelection: () => void;
 }
 
 export const useUiStore = create<UiStore>((set) => ({
+  view: "summary",
   selectedPtIds: [],
   activeTabId: null,
   ventana: 3,
+  procesoFiltro: null,
 
   mode: "requerimiento",
   expanded: new Set(),
-  filters: { cliente: "", ciudad: "", pt: "", fechaMax: "" },
+  filters: { clienteId: null, ciudadIds: [], pt: "", fechaMax: "", plantaId: null },
+
+  showSummary: () => set({ view: "summary", activeTabId: null }),
 
   togglePt: (idPt) =>
     set((s) => {
@@ -48,11 +73,16 @@ export const useUiStore = create<UiStore>((set) => ({
         const next = s.selectedPtIds.filter((id) => id !== idPt);
         const nextActive =
           s.activeTabId === idPt ? next[next.length - 1] ?? null : s.activeTabId;
-        return { selectedPtIds: next, activeTabId: nextActive };
+        return {
+          selectedPtIds: next,
+          activeTabId: nextActive,
+          view: nextActive === null ? "summary" : "tree",
+        };
       }
       return {
         selectedPtIds: [...s.selectedPtIds, idPt],
         activeTabId: idPt,
+        view: "tree",
       };
     }),
 
@@ -61,10 +91,19 @@ export const useUiStore = create<UiStore>((set) => ({
       const next = s.selectedPtIds.filter((id) => id !== idPt);
       const nextActive =
         s.activeTabId === idPt ? next[next.length - 1] ?? null : s.activeTabId;
-      return { selectedPtIds: next, activeTabId: nextActive };
+      return {
+        selectedPtIds: next,
+        activeTabId: nextActive,
+        view: nextActive === null ? "summary" : "tree",
+      };
     }),
 
-  setActiveTab: (idPt) => set({ activeTabId: idPt }),
+  setActiveTab: (idPt) =>
+    set(() => ({
+      activeTabId: idPt,
+      view: idPt === null ? "summary" : "tree",
+    })),
+
   setMode: (mode) => set({ mode }),
 
   toggleExpanded: (idComp) =>
@@ -81,5 +120,6 @@ export const useUiStore = create<UiStore>((set) => ({
     set((s) => ({ filters: { ...s.filters, [key]: value } })),
 
   setVentana: (v) => set({ ventana: v }),
-  clearSelection: () => set({ selectedPtIds: [], activeTabId: null }),
+  setProcesoFiltro: (p) => set({ procesoFiltro: p }),
+  clearSelection: () => set({ selectedPtIds: [], activeTabId: null, view: "summary" }),
 }));
