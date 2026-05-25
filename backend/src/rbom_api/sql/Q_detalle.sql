@@ -143,5 +143,14 @@ WHERE e.bActiva           = 1
     IdComponent
   FROM
     cteCompArbol)
+  -- Excluir etiquetas ya remisionadas: aunque sigan bActiva=1, su presencia
+  -- en tblRemisionEtiquetaDetalle implica que ya estan comprometidas con un
+  -- embarque y no son inventario disponible. Sin esto, el bloque "Embarques"
+  -- queda inflado (~94% son etiquetas ya remisionadas).
+  AND NOT EXISTS (
+        SELECT 1
+        FROM EPS.Produccion.tblRemisionEtiquetaDetalle red
+        WHERE red.idEtiqueta = e.idEtiqueta
+  )
 GROUP BY e.idMaterial, e.idProcesoSiguiente, p.Nombre
 ORDER BY e.idMaterial, Piezas DESC;
