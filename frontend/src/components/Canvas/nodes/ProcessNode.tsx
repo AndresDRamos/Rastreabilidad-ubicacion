@@ -66,11 +66,17 @@ export function ProcessNode({ data }: Props) {
       </div>
 
       <div className="px-2.5 py-2">
-        <div className="text-xs font-medium text-ink truncate" title={data.proceso}>
+        <div
+          className="text-xs font-medium text-ink truncate"
+          title={data.proceso}
+        >
           {data.proceso}
         </div>
         {data.ruta && data.ruta !== data.proceso ? (
-          <div className="text-[10px] text-ink-subtle truncate" title={data.ruta}>
+          <div
+            className="text-[10px] text-ink-subtle truncate"
+            title={data.ruta}
+          >
             {data.ruta}
           </div>
         ) : null}
@@ -82,14 +88,14 @@ export function ProcessNode({ data }: Props) {
             colorCls="text-status-covered"
           />
           <Metric
-            value={data.liberadas}
-            label="Liberadas"
-            colorCls="text-status-pt"
-          />
-          <Metric
             value={data.enInspeccion}
             label="En Inspección"
             colorCls="text-status-partial"
+          />
+          <Metric
+            value={data.liberadas}
+            label="Liberadas"
+            colorCls="text-status-pt"
           />
         </div>
       </div>
@@ -114,7 +120,9 @@ function Metric({ value, label, colorCls }: MetricProps) {
       >
         {fmtInt(value)}
       </span>
-      <span className={`text-[9px] mt-0.5 ${dim ? "text-ink-subtle" : "text-ink-muted"}`}>
+      <span
+        className={`text-[9px] mt-0.5 ${dim ? "text-ink-subtle" : "text-ink-muted"}`}
+      >
         {label}
       </span>
     </div>
