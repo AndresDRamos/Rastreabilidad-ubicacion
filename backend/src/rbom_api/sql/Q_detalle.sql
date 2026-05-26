@@ -119,7 +119,21 @@ FROM
 ORDER BY mrt.idMaterial, mrt.OrdenFabricacion;
 
 
--- (4) WIP por componente, posicionado por idProcesoSiguiente -------------------
+-- (4) WIP por (componente, proceso) en 3 buckets ------------------------------
+--   Por procesar = idProcesoSiguiente = idProceso ∧ estatus = LIBERADO (=2)
+--                  Mismas piezas que el CTE anterior; alimenta el netteo.
+--   Liberadas    = bUltimoProceso(idProceso) ∧ estatus = LIBERADO (=2)
+--                  Piezas que YA salieron de este proceso (buffer hacia el sig).
+--   En Inspección= bUltimoProceso(idProceso) ∧ estatus = POR INSPECCION (=1)
+--                  Piezas que pasaron por este proceso pero aún están en QC.
+--
+-- Garantía de no-duplicación:
+--   - LEFT JOIN a tblEtiquetaProceso con bUltimoProceso=1: validado contra BD
+--     que las únicas etiquetas con esa flag duplicada son bActiva=false; el
+--     filtro `e.bActiva = 1` las excluye.
+--   - UNION ALL puede repetir una etiqueta en dos buckets distintos, pero NO
+--     en el mismo (idComp, idProceso): si idProcesoSiguiente=X entonces el
+--     último proceso histórico ≠ X.
 WITH
   cteCompArbol
   AS
@@ -131,33 +145,60 @@ WITH
       EPS.AppProc.tblBomExplosionado b
     WHERE b.IdMaterial = @idPT
       AND b.IdTipoMaterial IN (1, 3)
+  ),
+  cteEtq
+  AS
+  (
+    -- Universo de etiquetas filtradas UNA sola vez
+    SELECT
+      e.idEtiqueta
+      ,e.idMaterial               AS idComp
+      ,e.idProcesoSiguiente
+      ,e.idEstatusEtiqueta
+      ,e.cantidad
+      ,ep.idProceso               AS idProcesoUlt  -- último proceso histórico (NULL si no tiene)
+    FROM
+      EPS.Produccion.tblEtiqueta e
+      LEFT JOIN EPS.Produccion.tblEtiquetaProceso ep
+             ON ep.idEtiqueta = e.idEtiqueta
+            AND ep.bUltimoProceso = 1
+    WHERE e.bActiva           = 1
+      AND e.idTipoEtiqueta    = 3              -- LIBERACION
+      AND e.idEstatusEtiqueta IN (1, 2)        -- POR INSPECCION + LIBERADO
+      AND e.idMaterial IN (SELECT IdComponent FROM cteCompArbol)
+      AND NOT EXISTS (
+            SELECT 1
+            FROM EPS.dbo.vwEtiquetasEnRemision red
+            WHERE red.idEtiqueta = e.idEtiqueta
+          )
+  ),
+  cteBuckets
+  AS
+  (
+    SELECT idComp, idProcesoSiguiente AS idProceso, cantidad,
+           1 AS bPorProcesar, 0 AS bLiberadas, 0 AS bInspeccion
+    FROM cteEtq
+    WHERE idEstatusEtiqueta = 2 AND idProcesoSiguiente IS NOT NULL
+    UNION ALL
+    SELECT idComp, idProcesoUlt, cantidad, 0, 1, 0
+    FROM cteEtq
+    WHERE idEstatusEtiqueta = 2 AND idProcesoUlt IS NOT NULL
+    UNION ALL
+    SELECT idComp, idProcesoUlt, cantidad, 0, 0, 1
+    FROM cteEtq
+    WHERE idEstatusEtiqueta = 1 AND idProcesoUlt IS NOT NULL
   )
 SELECT
-  e.idMaterial                                AS idComp
-  ,e.idProcesoSiguiente
-  ,ISNULL(p.Nombre, '(sin proceso)')           AS ProcesoSiguiente
-  ,COUNT(*)                                    AS Etiquetas
-  ,SUM(e.cantidad)                             AS Piezas
-FROM
-  EPS.Produccion.tblEtiqueta e
-  LEFT JOIN EPS.dbo.tblProceso p ON e.idProcesoSiguiente = p.idProceso
-WHERE e.bActiva           = 1
-  AND e.idEstatusEtiqueta = 2 -- LIBERADO
-  AND e.idTipoEtiqueta    = 3 -- LIBERACION
-  AND e.idMaterial IN (SELECT
-    IdComponent
-  FROM
-    cteCompArbol)
-  -- Excluir etiquetas ya remisionadas: aunque sigan bActiva=1, su presencia
-  -- en  EPS.dbo.vwEtiquetasEnRemision implica que ya estan comprometidas con un
-  -- embarque y no son inventario disponible. Sin esto, el bloque "Embarques"
-  -- queda inflado (~94% son etiquetas ya remisionadas).
-  AND NOT EXISTS (
-        SELECT
-    1
-  FROM
-    EPS.dbo.vwEtiquetasEnRemision red
-  WHERE red.idEtiqueta = e.idEtiqueta
-  )
-GROUP BY e.idMaterial, e.idProcesoSiguiente, p.Nombre
-ORDER BY e.idMaterial, Piezas DESC;
+  b.idComp
+  ,b.idProceso
+  ,ISNULL(p.Nombre, '(sin proceso)')                              AS Proceso
+  ,SUM(CASE WHEN b.bPorProcesar = 1 THEN 1 ELSE 0 END)            AS Etiquetas
+  ,SUM(CASE WHEN b.bPorProcesar = 1 THEN b.cantidad ELSE 0 END)   AS Piezas
+  ,SUM(CASE WHEN b.bLiberadas   = 1 THEN 1 ELSE 0 END)            AS EtiquetasLiberadas
+  ,SUM(CASE WHEN b.bLiberadas   = 1 THEN b.cantidad ELSE 0 END)   AS PiezasLiberadas
+  ,SUM(CASE WHEN b.bInspeccion  = 1 THEN 1 ELSE 0 END)            AS EtiquetasInspeccion
+  ,SUM(CASE WHEN b.bInspeccion  = 1 THEN b.cantidad ELSE 0 END)   AS PiezasInspeccion
+FROM cteBuckets b
+LEFT JOIN EPS.dbo.tblProceso p ON p.idProceso = b.idProceso
+GROUP BY b.idComp, b.idProceso, p.Nombre
+ORDER BY b.idComp, Piezas DESC;

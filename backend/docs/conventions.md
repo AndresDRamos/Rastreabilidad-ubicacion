@@ -1,6 +1,6 @@
 # backend/docs/conventions.md
 
-> Cuándo cargar: cuando estés por hacer un cambio que afecte algo "raro" del backend (concurrencia, env, caché, tipado) y quieras saber por qué está como está antes de tocarlo.
+> Cuándo cargar: cuando estés por hacer un cambio que afecte algo "raro" del backend (concurrencia, env, caché, tipado, placeholders SQL) y quieras saber por qué está como está antes de tocarlo.
 
 ## Endpoints `def`, no `async def`
 
@@ -28,10 +28,11 @@ def get_conn() -> Iterator[pyodbc.Connection]:
         conn.close()
 ```
 
-**Razón**: pyodbc Connection NO es thread-safe entre threads. Cursor sí, Connection no. Como FastAPI corre los endpoints en threads distintos del pool, compartir una conexión global sería un bug latente.
+**Razón**: pyodbc `Connection` NO es thread-safe entre threads. Cursor sí, Connection no. Como FastAPI corre los endpoints en threads distintos del pool, compartir una conexión global sería un bug latente.
 
 **Costo**: abrir conexión tarda ~50-150 ms (handshake TCP + auth). Aceptable porque:
-- `/api/pts` está cacheado 5 min (la mayoría de hits no llega aquí).
+
+- `/api/pts` y `/api/bloques` están cacheados (5 min y 2 min respectivamente) — la mayoría de hits no llega aquí.
 - `/api/pts/{id}/arbol` es manual del usuario, no en hot path.
 
 **Si necesitas pool**: usa `pyodbc.pooling = True` (pooling a nivel ODBC driver, transparente), NO un pool a nivel Python. Verifica con load testing antes de meterlo.
@@ -45,7 +46,7 @@ class _Base(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 ```
 
-**Razón**: las queries devuelven columnas que ningún modelo usa hoy (ej. `Lineas`, `LineasFirme` en `FilaListado` o columnas auxiliares en BOM). Si pydantic fuera estricto (`extra="forbid"`), cualquier `SELECT *` o columna nueva rompería todo.
+**Razón**: las queries devuelven columnas que ningún modelo usa hoy (`Lineas`, `LineasFirme`, etc.). Si pydantic fuera estricto (`extra="forbid"`), cualquier `SELECT *` o columna nueva rompería todo. El schema de EPS evoluciona; el modelo tiene que tolerar deriva.
 
 **Costo / trade-off**: un typo en un campo (ej. `IdBomParant` por error) se ignora silenciosamente y el modelo queda con `None`. Si vas a renombrar columnas, agrega un test de smoke que afirme las columnas críticas.
 
@@ -83,35 +84,59 @@ Si no se invalida, `main.py` ya instanció `Settings()` al importarse y nunca le
 
 ```python
 import structlog
-log = structlog.get_logger("rbom_api.miñ_modulo")
+log = structlog.get_logger("rbom_api.mi_modulo")
 log.info("algo_paso", clave=valor)   # estructurado, no f-strings
 ```
 
-## TTL Cache del listado: 5 min, maxsize=4
+## TTL Cache: dos patrones
 
-`routers/pts.py`:
+Hoy conviven dos formas, según la combinatoria de filtros del endpoint:
+
+### Patrón A — cache por (ventana, fecha_max), maxsize 32 (`routers/pts.py`)
 
 ```python
-_cache: TTLCache[int, list[FilaListado]] = TTLCache(maxsize=4, ttl=300)
+_cache: TTLCache[tuple[int, str | None], list[FilaListado]] = TTLCache(maxsize=32, ttl=300)
 _lock = threading.Lock()
 ```
 
-**Razones**:
-- TTL 300 s — la tabla `tblDemandaEPS` se mueve pero no segundo a segundo. 5 min es buen balance entre freshness y costo.
-- maxsize=4 — sólo se usan ventanas típicas {1, 2, 3, 6}. Si excedes, se evicta el menos usado.
-- `threading.Lock`, no `asyncio.Lock` — los endpoints son sync (ver arriba).
+Sirve cuando los parámetros relevantes son pocos y la cardinalidad es baja.
+
+### Patrón B — cache multi-filtro keyed por tuplas ordenadas (`routers/bloques.py`)
+
+```python
+_CacheKeyBloques = tuple[
+    int | None, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
+]
+key = (
+    cliente,
+    planta,
+    tuple(sorted(ids_ciudad)),
+    tuple(sorted(ids_tipo)),
+    tuple(sorted(ids_clase)),
+)
+```
+
+Reglas para escalar:
+
+- **Siempre `tuple(sorted(...))`** para que `[1, 2]` y `[2, 1]` colisionen — si no, los hits se desperdician.
+- **Una key explícita por endpoint** (no compartas la cache entre 2 endpoints aunque acepten los mismos filtros).
+- **`threading.Lock`** global del módulo, no por cache.
+- **TTL más corto que el patrón A** (120 s vs 300 s) porque el dataset es más volátil (movimientos de etiquetas durante el día).
 
 **Si quieres invalidar manualmente**:
 
 ```python
-from rbom_api.routers.pts import _cache, _lock
+from rbom_api.routers.bloques import _cache_bloques, _cache_pts, _lock
 with _lock:
-    _cache.clear()
+    _cache_bloques.clear()
+    _cache_pts.clear()
 ```
 
 Pero **NO expongas un endpoint público** para invalidar. Si lo necesitas, hazlo con un secret o restríngelo a red interna.
 
-## SQL queries con `DECLARE` y `_strip_param_declarations`
+## SQL queries: cabecera `DECLARE` + placeholders `/*FILTRO*/`
+
+### `DECLARE` defaults para ejecución SSMS
 
 Los `.sql` traen `DECLARE @x = ISNULL(@x, default);` al inicio para que sean ejecutables tal cual en SSMS. Al ejecutarlos desde Python, prepend otro `DECLARE @x = valor_real;` y stripea los originales:
 
@@ -119,12 +144,47 @@ Los `.sql` traen `DECLARE @x = ISNULL(@x, default);` al inicio para que sean eje
 sql_param = (
     f"DECLARE @idPT int = {int(idPT)};\n"
     f"DECLARE @ventana_meses int = {int(ventana_meses)};\n"
+    f"DECLARE @fecha_max date = '{fecha_max}';\n"   # o NULL
 ) + _strip_param_declarations(sql)
 ```
 
-`_strip_param_declarations` busca líneas que arrancan con `declare @ventana_meses` o `declare @idpt` (case-insensitive) y las omite. **Si agregas un nuevo parámetro al query**, agrégale el stripping correspondiente al helper.
+`_strip_param_declarations` busca líneas que arrancan con `declare @x` (case-insensitive) para una lista hard-coded de variables. **Si agregas un nuevo parámetro al query**, agrégale el stripping correspondiente al helper.
 
-**Alternativa más limpia**: parametrizar con `cursor.execute(sql, params)` y poner los `?`. Implica reescribir las queries (no usar `DECLARE`). Es trabajo, pero quita esta complejidad. Por ahora se mantiene el patrón actual porque facilita debugging desde SSMS.
+**Alternativa más limpia**: parametrizar con `cursor.execute(sql, params)` y poner `?` en el SQL. Implica reescribir las queries (no usar `DECLARE`). Es trabajo, pero quita esta complejidad. Hoy mantenemos el patrón actual porque facilita debugging desde SSMS.
+
+### Placeholders `/*FILTRO*/` para `IN (...)` dinámicos
+
+T-SQL no parametriza listas; `WHERE x IN (?, ?, ?)` necesitaría un `?` por elemento. La solución en este repo es **string-replacement de comentarios**:
+
+```sql
+WHERE d.bActivo = 1
+  AND (@idCliente IS NULL OR d.idCliente = @idCliente)
+  /*CIUDADES_FILTER*/
+  /*CLASE_FILTER*/
+```
+
+Y desde Python:
+
+```python
+sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
+sql = sql.replace("/*CLASE_FILTER*/",   _clase_predicate(ids_clase))
+```
+
+Cada `_*_predicate`:
+
+1. Si la lista es vacía/None → devuelve `""` (no se filtra).
+2. Si no → castea **cada id como `int(...)`** y arma `AND tabla.col IN (1,2,3)`.
+
+El cast a `int(...)` es la única defensa anti-inyección. Si agregas un placeholder nuevo, **sigue el patrón exacto**: nunca interpoles strings del usuario sin pasarlos por `int(...)` o un parser equivalente.
+
+**Cuándo agregar un placeholder nuevo**:
+
+1. Agrega el comentario al `.sql` (`/*MI_FILTER*/`), dentro del CTE adecuado.
+2. Crea `_mi_predicate(ids)` en `db.py`.
+3. Llama `sql.replace("/*MI_FILTER*/", _mi_predicate(...))` en `fetch_*`.
+4. Acepta el filtro en el router (CSV `Query` + `_parse_int_csv`).
+5. Inclúyelo en la cache key del router.
 
 ## `.env` files
 
@@ -141,20 +201,22 @@ sql_param = (
 
 ## Tipos y validación de path/query params
 
-Uso `Annotated[int, Query(ge=..., le=...)]` en vez de los defaults:
+Uso `Annotated[T, Query(ge=..., le=...)]` en vez de los defaults:
 
 ```python
 @router.get("/api/pts/{idPt}/arbol")
 def get_arbol(
     idPt: int,
     ventana: Annotated[int, Query(ge=1, le=24)] = 3,
+    fecha_max: Annotated[date | None, Query()] = None,
     ...
 ) -> ArbolPT:
 ```
 
-- `Annotated[int, Query(...)]` es la sintaxis moderna (FastAPI ≥ 0.95).
+- `Annotated[…, Query(...)]` es la sintaxis moderna (FastAPI ≥ 0.95).
 - `ge`/`le` evita ventanas absurdas (ej. 1000 meses = query de 80 años).
-- 422 automático para valores fuera de rango.
+- `date | None` parsea ISO `yyyy-mm-dd` automáticamente; valores inválidos → 422.
+- Para listas CSV (ciudades, tipos_material, clases) usamos `Annotated[str | None, Query()]` + parsing manual con `_parse_int_csv`. Pydantic no maneja CSV nativos; si quieres tipado más estricto, puedes aceptar `list[int]` con `Query()` (FastAPI lo convierte si se repite el query param), pero el frontend actual usa CSV para que la URL quede legible.
 
 ## Manejo de errores en routers
 
@@ -174,7 +236,7 @@ Todo lo demás (pyodbc.Error, etc.) se propaga y FastAPI devuelve 500. La razón
 ## `SQL_DIR` como ruta absoluta
 
 ```python
-PACKAGE_DIR = Path(__file__).parent
+PACKAGE_DIR = Path(__file__).resolve().parent
 SQL_DIR = PACKAGE_DIR / "sql"
 ```
 

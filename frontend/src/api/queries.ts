@@ -58,11 +58,13 @@ export function useBloques(
   planta: number | null = null,
   ciudadIds: number[] = [],
   tipoMaterialIds: number[] = [],
+  claseIds: number[] = [],
 ) {
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
   const tiposKey = idsCsv(tipoMaterialIds) ?? "";
+  const clasesKey = idsCsv(claseIds) ?? "";
   return useQuery<BloqueProceso[]>({
-    queryKey: ["bloques", cliente, planta, ciudadesKey, tiposKey],
+    queryKey: ["bloques", cliente, planta, ciudadesKey, tiposKey, clasesKey],
     queryFn: async () => {
       const params: Record<string, string | number> = {};
       if (cliente != null) params.cliente = cliente;
@@ -71,6 +73,8 @@ export function useBloques(
       if (ciud) params.ciudades = ciud;
       const tipos = idsCsv(tipoMaterialIds);
       if (tipos) params.tipos_material = tipos;
+      const clases = idsCsv(claseIds);
+      if (clases) params.clases = clases;
       const { data } = await apiClient.get<BloqueProceso[]>("/bloques", {
         params,
       });
@@ -86,9 +90,11 @@ export function usePtsEnProceso(
   planta: number | null = null,
   ciudadIds: number[] = [],
   tipoMaterialIds: number[] = [],
+  claseIds: number[] = [],
 ) {
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
   const tiposKey = idsCsv(tipoMaterialIds) ?? "";
+  const clasesKey = idsCsv(claseIds) ?? "";
   return useQuery<PTEnProceso[]>({
     queryKey: [
       "pts-en-proceso",
@@ -97,6 +103,7 @@ export function usePtsEnProceso(
       planta,
       ciudadesKey,
       tiposKey,
+      clasesKey,
     ],
     enabled: idProceso !== null,
     queryFn: async () => {
@@ -107,6 +114,8 @@ export function usePtsEnProceso(
       if (ciud) params.ciudades = ciud;
       const tipos = idsCsv(tipoMaterialIds);
       if (tipos) params.tipos_material = tipos;
+      const clases = idsCsv(claseIds);
+      if (clases) params.clases = clases;
       const { data } = await apiClient.get<PTEnProceso[]>(
         `/bloques/${idProceso}/pts`,
         { params },

@@ -20,6 +20,12 @@
 --   /*TIPOMAT_FILTER*/  Si el usuario selecciono tipos de material (PT=1,
 --                       Intermedio=3), se reemplaza por
 --                       "AND m.idTipoMaterial IN (...)"; vacio = sin filtro.
+--   /*CLASE_FILTER*/    Si el usuario selecciono clases NetSuit
+--                       (CLASS_ID_ARTCULO_ID), se reemplaza por
+--                       "AND I.CLASS_ID_ARTCULO_ID IN (...)"; vacio = sin
+--                       filtro. Restringe el universo de PTs (cteDem).
+--                       Cuando hay clase filtrada, el backend fuerza
+--                       @conFiltroUniverso = 1.
 -- =============================================================================
 
 DECLARE @idCliente         int = @idCliente;
@@ -37,10 +43,12 @@ WITH
             d.idMaterial AS idPT
         FROM
             EPS.dbo.tblDemandaEPS d
+            LEFT JOIN NETSUITE.dbo.ITEMS I ON I.ITEM_ID = d.ItemID
         WHERE d.bActivo = 1
             AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
             AND (@idCliente IS NULL OR d.idCliente = @idCliente)
         /*CIUDADES_FILTER*/
+        /*CLASE_FILTER*/
     )
     ,cteCompUniv
     AS

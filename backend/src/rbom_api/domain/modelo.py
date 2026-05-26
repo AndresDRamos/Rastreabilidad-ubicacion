@@ -22,6 +22,8 @@ class FilaListado(_Base):
     Cliente: str
     idCiudad: Optional[int] = None
     Ciudad: str
+    idClase: Optional[int] = None    # NETSUITE.dbo.ITEMS.CLASS_ID_ARTCULO_ID
+    Clase: Optional[str] = None      # NETSUITE.dbo.CLASS_ID.LIST_ITEM_NAME
     PiezasPend: float
     PiezasPastDue: float
     FechaPromMin: date
@@ -82,11 +84,25 @@ class FilaRuta(_Base):
 
 
 class FilaWip(_Base):
+    """WIP por (componente, proceso) en 3 buckets.
+
+    - `Piezas` / `Etiquetas` = bucket "Por procesar" (idProcesoSiguiente == idProceso,
+      estatus LIBERADO). Único bucket que alimenta el netteo (compat con el
+      contrato previo donde el WIP venía agrupado por idProcesoSiguiente).
+    - `PiezasLiberadas` / `EtiquetasLiberadas` = piezas que ya salieron del proceso
+      (bUltimoProceso=1 ∧ estatus LIBERADO). Solo display.
+    - `PiezasInspeccion` / `EtiquetasInspeccion` = piezas que pasaron por el proceso
+      y aún están en QC (bUltimoProceso=1 ∧ estatus POR INSPECCION). Solo display.
+    """
     idComp: int
-    idProcesoSiguiente: Optional[int] = None
-    ProcesoSiguiente: str
-    Etiquetas: int
-    Piezas: float
+    idProceso: Optional[int] = None
+    Proceso: str
+    Etiquetas: int = 0
+    Piezas: float = 0.0
+    EtiquetasLiberadas: int = 0
+    PiezasLiberadas: float = 0.0
+    EtiquetasInspeccion: int = 0
+    PiezasInspeccion: float = 0.0
 
 
 # ---------- Salida JSON: arbol netteado --------------------------------------
@@ -106,6 +122,11 @@ class PasoRuta(_Base):
     es_virtual: bool = False
     req_paso: float = 0.0           # piezas que aun deben pasar por este step
     wip_en_paso: float = 0.0        # piezas con idProcesoSiguiente = idProceso_de_este_paso
+    etiquetas_en_paso: int = 0      # conteo de etiquetas del bucket "Por procesar"
+    liberadas: float = 0.0          # piezas que YA salieron de este proceso (bUltimoProceso=1, LIBERADO)
+    etiquetas_liberadas: int = 0
+    en_inspeccion: float = 0.0      # piezas en QC de este proceso (bUltimoProceso=1, POR INSPECCION)
+    etiquetas_inspeccion: int = 0
     label: str = ""                 # ej. "Doblez (120 de 200)"
 
 

@@ -11,12 +11,14 @@ export function SummaryView() {
   const plantaId = useUiStore((s) => s.filters.plantaId);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
+  const claseIds = useUiStore((s) => s.filters.claseIds);
   const setFilter = useUiStore((s) => s.setFilter);
   const { data: bloques, isLoading, error, isFetching } = useBloques(
     clienteId,
     plantaId,
     ciudadIds,
     tipoMaterialIds,
+    claseIds,
   );
   const procesoFiltro = useUiStore((s) => s.procesoFiltro);
   const setProcesoFiltro = useUiStore((s) => s.setProcesoFiltro);
@@ -72,6 +74,16 @@ export function SummaryView() {
                   : `${ciudadIds.length} ciudades`
               }
               onRemove={() => setFilter("ciudadIds", [])}
+            />
+          ) : null}
+          {claseIds.length > 0 ? (
+            <FilterChip
+              label={
+                claseIds.length === 1
+                  ? "1 clase"
+                  : `${claseIds.length} clases`
+              }
+              onRemove={() => setFilter("claseIds", [])}
             />
           ) : null}
           {isFetching && !isLoading ? (

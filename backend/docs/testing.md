@@ -6,7 +6,7 @@
 
 | Suite | Carpeta | Tests | BD? | Marker | Comando |
 | --- | --- | --- | --- | --- | --- |
-| Unit (contrato del netteo) | `tests/unit/` | 8 | NO | (sin marker) | `pytest -m "not e2e"` |
+| Unit (contrato del netteo) | `tests/unit/` | 9 | NO | (sin marker) | `pytest -m "not e2e"` |
 | E2E (contra BD real) | `tests/e2e/` | 4 | SÍ (192.168.4.5) | `@pytest.mark.e2e` | `pytest -m e2e` |
 
 `pyproject.toml` registra el marker:
@@ -20,7 +20,7 @@ markers = [
 
 ## Unit tests — el contrato del netteo
 
-`tests/unit/test_netteo.py` contiene los 8 tests que definen el comportamiento del algoritmo. Son **el ground truth ejecutable**: si tocas `domain/netteo.py`, estos tests deben seguir verdes.
+`tests/unit/test_netteo.py` contiene los 9 tests que definen el comportamiento del algoritmo. Son **el ground truth ejecutable**: si tocas `domain/netteo.py`, estos tests deben seguir verdes.
 
 | Test | Verifica |
 | --- | --- |
@@ -32,6 +32,7 @@ markers = [
 | `test_falla_sin_demanda` | `construir_arbol(demanda_filas=[], ...)` lanza `ValueError("Sin filas de demanda...")`. |
 | `test_agrupacion_pasos_por_idProceso` | 3 sub-pasos con el mismo `idProceso=6` (Soldadura Robot/Limpieza/Manual) colapsan en 1 `PasoRuta`. El WIP se cuenta una sola vez. |
 | `test_advertencia_wip_fuera_ruta` | WIP de Ca con `idProcesoSiguiente=99` (proceso no listado en su ruta) genera una advertencia. |
+| `test_liberadas_e_inspeccion_no_afectan_req_paso` | Fija el contrato de los 3 buckets: con `PiezasLiberadas=999` y `PiezasInspeccion=999` los `req_paso`/`req_neto` son **idénticos** al caso baseline. Solo el bucket "Por procesar" (`Piezas`) descuenta demanda. Verifica también la hidratación correcta de `liberadas` / `en_inspeccion` en cada `PasoRuta`. |
 
 **Datos sintéticos**: helpers `_demanda(req_pt)`, `_bom()`, `_rutas()`, `_wip_caso_ejemplo()`. IDs ficticios (CP=100, CB=200, CA=300, CC=400). No tocan SQL Server.
 
@@ -66,6 +67,7 @@ def settings() -> Settings:
 **Punto crítico**: `get_settings()` fue invocado al importar `rbom_api.main` (que ejecuta `app = create_app()` al final). Esa primera instancia se cacheó con `@lru_cache`. Sin `cache_clear()`, las vars del `.env.test` se ignoran.
 
 El parser custom (`_parse_dotenv_value`) maneja:
+
 - Comentarios inline tipo `EPS_USER=foo # admin de tests`.
 - Quotes envolventes `EPS_PASSWORD="hola # mundo"` (preserva el `#` interno).
 
@@ -156,7 +158,7 @@ cd backend
 .\.venv\Scripts\python.exe -m pytest -m "not e2e" -v
 ```
 
-8 verdes obligatorios. Si tocaste algo crítico:
+9 verdes obligatorios. Si tocaste algo crítico:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -m e2e -v

@@ -1,18 +1,21 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 
-import { useUiStore } from "@/store/useUiStore";
 import type { ProcessNodeData } from "@/lib/buildGraph";
 import { fmtInt, fmtPlanta } from "@/lib/format";
 
 type Props = NodeProps<Node<ProcessNodeData>>;
 
+/** Tarjeta de un paso de la ruta de fabricación.
+ *
+ * Muestra tres ángulos del proceso, independientes del toggle Inv/Req del
+ * componente padre:
+ *   - Por procesar : piezas LIBERADAS del proceso anterior, esperando entrar.
+ *                    (= `wipEnPaso`, el bucket que alimenta el netteo.)
+ *   - Liberadas    : piezas que YA salieron de este proceso y esperan al siguiente.
+ *   - En Inspección: piezas que pasaron por este proceso y están en QC.
+ */
 export function ProcessNode({ data }: Props) {
-  const mode = useUiStore((s) => s.mode);
-  const valor = mode === "inventario" ? data.wipEnPaso : data.reqPaso;
-  const subLabel = mode === "inventario" ? "en este paso" : "por procesar";
-
-  // Tono mas ligero cuando el paso esta cubierto (req_paso=0).
   const cubierto = data.reqPaso <= 0;
   const borderCls = data.highlighted
     ? "border-status-pt"
@@ -22,15 +25,13 @@ export function ProcessNode({ data }: Props) {
         ? "border-status-partial/50"
         : "border-surface-border";
 
-  // Resaltado: ring azul + sombra mas marcada cuando el paso coincide con el
-  // drill-down activo desde el Resumen.
   const highlightCls = data.highlighted
     ? "ring-2 ring-status-pt/40 ring-offset-2 ring-offset-surface-muted shadow-card"
     : "shadow-soft";
 
   return (
     <div
-      className={`rounded-lg bg-white border ${borderCls} ${highlightCls} overflow-hidden w-[180px] transition-shadow`}
+      className={`rounded-lg bg-white border ${borderCls} ${highlightCls} overflow-hidden w-[220px] transition-shadow`}
     >
       <Handle
         type="source"
@@ -65,22 +66,65 @@ export function ProcessNode({ data }: Props) {
       </div>
 
       <div className="px-2.5 py-2">
-        <div className="text-xs font-medium text-ink truncate" title={data.proceso}>
+        <div
+          className="text-xs font-medium text-ink truncate"
+          title={data.proceso}
+        >
           {data.proceso}
         </div>
         {data.ruta && data.ruta !== data.proceso ? (
-          <div className="text-[10px] text-ink-subtle truncate" title={data.ruta}>
+          <div
+            className="text-[10px] text-ink-subtle truncate"
+            title={data.ruta}
+          >
             {data.ruta}
           </div>
         ) : null}
 
-        <div className="mt-1.5 flex items-baseline gap-1">
-          <span className="text-lg font-semibold tabular-nums text-ink leading-none">
-            {fmtInt(valor)}
-          </span>
-          <span className="text-[10px] text-ink-muted">{subLabel}</span>
+        <div className="mt-2 grid grid-cols-3 gap-1.5">
+          <Metric
+            value={data.wipEnPaso}
+            label="Por procesar"
+            colorCls="text-status-covered"
+          />
+          <Metric
+            value={data.enInspeccion}
+            label="En Inspección"
+            colorCls="text-status-partial"
+          />
+          <Metric
+            value={data.liberadas}
+            label="Liberadas"
+            colorCls="text-status-pt"
+          />
         </div>
       </div>
+    </div>
+  );
+}
+
+interface MetricProps {
+  value: number;
+  label: string;
+  colorCls: string;
+}
+
+function Metric({ value, label, colorCls }: MetricProps) {
+  const dim = value <= 0;
+  return (
+    <div className="flex flex-col leading-none">
+      <span
+        className={`text-base font-semibold tabular-nums ${
+          dim ? "text-ink-subtle" : colorCls
+        }`}
+      >
+        {fmtInt(value)}
+      </span>
+      <span
+        className={`text-[9px] mt-0.5 ${dim ? "text-ink-subtle" : "text-ink-muted"}`}
+      >
+        {label}
+      </span>
     </div>
   );
 }
