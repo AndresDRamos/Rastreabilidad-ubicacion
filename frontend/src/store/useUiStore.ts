@@ -9,6 +9,7 @@ export interface UiFilters {
   fechaMax: string;            // ISO yyyy-mm-dd; "" = sin filtro
   plantaId: number | null;     // null = todas las plantas
   tipoMaterialIds: number[];   // [] = sin filtro (PT + Intermedio). PT=1, Intermedio=3.
+  claseIds: number[];          // [] = sin filtro. Aplica solo a Resumen (Q_bloques / Q_pts_en_proceso).
 }
 
 export interface ProcesoFiltro {
@@ -70,6 +71,7 @@ export const useUiStore = create<UiStore>((set) => ({
     fechaMax: "",
     plantaId: null,
     tipoMaterialIds: [],
+    claseIds: [],
   },
 
   showSummary: () => set({ view: "summary", activeTabId: null }),

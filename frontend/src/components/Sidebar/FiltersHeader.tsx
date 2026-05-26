@@ -1,5 +1,6 @@
 import { useUiStore } from "@/store/useUiStore";
 import { CiudadMultiSelect } from "./CiudadMultiSelect";
+import { ClaseMultiSelect } from "./ClaseMultiSelect";
 import { ClienteCombobox } from "./ClienteCombobox";
 
 export function FiltersHeader() {
@@ -10,6 +11,7 @@ export function FiltersHeader() {
     <div className="px-4 pt-4 pb-3 space-y-2 border-b border-surface-border">
       <ClienteCombobox />
       <CiudadMultiSelect />
+      <ClaseMultiSelect />
       <Input
         placeholder="Numero de parte"
         value={filters.pt}

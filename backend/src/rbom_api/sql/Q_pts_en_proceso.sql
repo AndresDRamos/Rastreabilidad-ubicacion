@@ -16,6 +16,9 @@
 --   /*CIUDADES_FILTER*/ "AND d.idCiudad IN (...)" si hay ciudades, "" si no.
 --   /*TIPOMAT_FILTER*/  "AND m.idTipoMaterial IN (...)" si el usuario filtra
 --                       por tipos (PT=1, Intermedio=3); vacio = sin filtro.
+--   /*CLASE_FILTER*/    "AND I.CLASS_ID_ARTCULO_ID IN (...)" si el usuario
+--                       filtra por clase NetSuit; vacio = sin filtro.
+--                       Restringe el universo de PTs en cteDem.
 -- =============================================================================
 
 DECLARE @idProcesoSelected int = @idProcesoSelected;
@@ -31,10 +34,12 @@ WITH
             d.idMaterial AS idPT
         FROM
             EPS.dbo.tblDemandaEPS d
+            LEFT JOIN NETSUITE.dbo.ITEMS I ON I.ITEM_ID = d.ItemID
         WHERE d.bActivo = 1
             AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
             AND (@idCliente IS NULL OR d.idCliente = @idCliente)
         /*CIUDADES_FILTER*/
+        /*CLASE_FILTER*/
     )
     ,cteBom
     AS

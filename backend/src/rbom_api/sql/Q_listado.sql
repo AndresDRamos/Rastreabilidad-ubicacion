@@ -21,6 +21,8 @@ WITH cteDem AS (
         d.idMaterial,
         d.idCliente,
         d.idCiudad,
+        I.CLASS_ID_ARTCULO_ID                                                   AS idClase,
+        C.LIST_ITEM_NAME                                                        AS Clase,
         SUM(d.Cantidad - ISNULL(d.Embarcado, 0))                                AS PiezasPend,
         MIN(CAST(d.Fecha AS date))                                              AS FechaPromMin,
         MAX(CAST(d.Fecha AS date))                                              AS FechaPromMax,
@@ -30,10 +32,12 @@ WITH cteDem AS (
         SUM(CASE WHEN CAST(d.Fecha AS date) < @hoy
                  THEN (d.Cantidad - ISNULL(d.Embarcado, 0)) ELSE 0 END)         AS PiezasPastDue
     FROM EPS.dbo.tblDemandaEPS d
+        LEFT JOIN NETSUITE.dbo.ITEMS    I ON I.ITEM_ID = d.ItemID
+        LEFT JOIN NETSUITE.dbo.CLASS_ID C ON C.LIST_ID = I.CLASS_ID_ARTCULO_ID
     WHERE d.bActivo = 1
       AND d.Fecha   <= @cutoff                         -- past-due incluido (sin piso)
       AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
-    GROUP BY d.idMaterial, d.idCliente, d.idCiudad
+    GROUP BY d.idMaterial, d.idCliente, d.idCiudad, I.CLASS_ID_ARTCULO_ID, C.LIST_ITEM_NAME
 )
 SELECT
     d.idMaterial,
@@ -43,6 +47,8 @@ SELECT
     ISNULL(c.NombreCliente, '(sin cliente)')       AS Cliente,
     d.idCiudad,
     ISNULL(ci.Ciudad, '(sin ciudad)')              AS Ciudad,
+    d.idClase,
+    d.Clase,
     d.PiezasPend,
     d.PiezasPastDue,
     d.FechaPromMin,
