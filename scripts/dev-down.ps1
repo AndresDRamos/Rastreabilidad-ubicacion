@@ -70,14 +70,15 @@ foreach ($p in $forks) {
 }
 
 # Espera breve a que Windows libere los listeners TCP.
+# Solo nos importa State=Listen; los TimeWait son cleanup normal de Windows
+# (no impiden rearrancar y desaparecen solos en 1-4 min).
 $libre = $false
 for ($i = 0; $i -lt 10; $i++) {
     Start-Sleep -Milliseconds 200
     $ocupado = $false
     foreach ($puerto in 5173, 8000) {
-        if (Get-NetTCPConnection -LocalPort $puerto -ErrorAction SilentlyContinue) {
-            $ocupado = $true; break
-        }
+        $listen = Get-NetTCPConnection -LocalPort $puerto -State Listen -ErrorAction SilentlyContinue
+        if ($listen) { $ocupado = $true; break }
     }
     if (-not $ocupado) { $libre = $true; break }
 }
@@ -85,5 +86,5 @@ for ($i = 0; $i -lt 10; $i++) {
 if ($libre) {
     Write-Host "Procesos dev detenidos."
 } else {
-    Write-Warning "Procesos dev detenidos, pero algun puerto sigue ocupado. Revisa con: Get-NetTCPConnection -LocalPort 8000,5173"
+    Write-Warning "Procesos dev detenidos, pero algun puerto sigue con un listener activo. Revisa con: Get-NetTCPConnection -LocalPort 8000,5173 -State Listen"
 }
