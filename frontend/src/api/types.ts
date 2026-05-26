@@ -9,6 +9,8 @@ export interface FilaListado {
   Cliente: string;
   idCiudad: number | null;
   Ciudad: string;
+  idClase: number | null; // NETSUITE.dbo.ITEMS.CLASS_ID_ARTCULO_ID
+  Clase: string | null;   // NETSUITE.dbo.CLASS_ID.LIST_ITEM_NAME
   PiezasPend: number;
   PiezasPastDue: number;
   FechaPromMin: string; // ISO date
@@ -41,7 +43,12 @@ export interface PasoRuta {
   idPlanta: number | null;
   es_virtual: boolean;
   req_paso: number;
-  wip_en_paso: number;
+  wip_en_paso: number;          // bucket "Por procesar" (alimenta el netteo)
+  etiquetas_en_paso: number;
+  liberadas: number;            // bUltimoProceso=1 ∧ estatus LIBERADO (solo display)
+  etiquetas_liberadas: number;
+  en_inspeccion: number;        // bUltimoProceso=1 ∧ estatus POR INSPECCION (solo display)
+  etiquetas_inspeccion: number;
   label: string;
 }
 

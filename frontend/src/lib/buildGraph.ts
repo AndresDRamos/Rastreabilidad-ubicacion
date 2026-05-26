@@ -64,7 +64,12 @@ export interface ProcessNodeData extends Record<string, unknown> {
   ordenEnRuta: number;
   totalPasos: number;
   reqPaso: number;
-  wipEnPaso: number;
+  wipEnPaso: number;             // bucket "Por procesar" (alimenta netteo)
+  etiquetasEnPaso: number;
+  liberadas: number;             // ya salieron del proceso (display)
+  etiquetasLiberadas: number;
+  enInspeccion: number;          // en QC del proceso (display)
+  etiquetasInspeccion: number;
   highlighted: boolean;
 }
 
@@ -229,6 +234,11 @@ export function buildGraph(
           totalPasos: pasosReales.length,
           reqPaso: paso.req_paso,
           wipEnPaso: paso.wip_en_paso,
+          etiquetasEnPaso: paso.etiquetas_en_paso,
+          liberadas: paso.liberadas,
+          etiquetasLiberadas: paso.etiquetas_liberadas,
+          enInspeccion: paso.en_inspeccion,
+          etiquetasInspeccion: paso.etiquetas_inspeccion,
           highlighted: isHighlighted,
         },
       });

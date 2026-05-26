@@ -97,15 +97,15 @@ def _rutas() -> list[FilaRuta]:
 
 def _wip_caso_ejemplo() -> list[FilaWip]:
     return [
-        # Cb tiene 1 pza armada esperando entrar al PT (idProcesoSiguiente=Soldadura del PT)
+        # Cb tiene 1 pza armada esperando entrar al PT (bucket "Por procesar" -> Soldadura)
         # Pero su wip_total cuenta como inventario disponible del intermedio
-        FilaWip(idComp=CB, idProcesoSiguiente=SOLDADURA, ProcesoSiguiente="Soldadura",
+        FilaWip(idComp=CB, idProceso=SOLDADURA, Proceso="Soldadura",
                 Etiquetas=1, Piezas=1),
         # Ca tiene 2 pzs en Almacen WIP (terminaron Doblez, esperando armado por Cb)
-        FilaWip(idComp=CA, idProcesoSiguiente=ALM_WIP_ID, ProcesoSiguiente=ALM_WIP_NOMBRE,
+        FilaWip(idComp=CA, idProceso=ALM_WIP_ID, Proceso=ALM_WIP_NOMBRE,
                 Etiquetas=1, Piezas=2),
         # Cc tiene 1 pza en Almacen WIP
-        FilaWip(idComp=CC, idProcesoSiguiente=ALM_WIP_ID, ProcesoSiguiente=ALM_WIP_NOMBRE,
+        FilaWip(idComp=CC, idProceso=ALM_WIP_ID, Proceso=ALM_WIP_NOMBRE,
                 Etiquetas=1, Piezas=1),
     ]
 
@@ -271,10 +271,10 @@ def test_req_paso_caso_diagrama_usuario():
     ]
     wip = [
         # 4 pzs de 90358715-RA esperando Doblez
-        FilaWip(idComp=C1_ID, idProcesoSiguiente=DOBLEZ_P, ProcesoSiguiente="Doblez",
+        FilaWip(idComp=C1_ID, idProceso=DOBLEZ_P, Proceso="Doblez",
                 Etiquetas=1, Piezas=4),
         # 9 pzs de 91711040-RA en Almacen WIP (terminaron Doblez)
-        FilaWip(idComp=C2_ID, idProcesoSiguiente=ALM_WIP_ID, ProcesoSiguiente="Almacen WIP",
+        FilaWip(idComp=C2_ID, idProceso=ALM_WIP_ID, Proceso="Almacen WIP",
                 Etiquetas=1, Piezas=9),
     ]
 
@@ -367,9 +367,9 @@ def test_agrupacion_pasos_por_idProceso():
     ]
     # WIP: 30 piezas yendo a Soldadura, 20 a Pintura
     wip = [
-        FilaWip(idComp=PT_ID, idProcesoSiguiente=SOLD_P, ProcesoSiguiente="Soldadura",
+        FilaWip(idComp=PT_ID, idProceso=SOLD_P, Proceso="Soldadura",
                 Etiquetas=3, Piezas=30),
-        FilaWip(idComp=PT_ID, idProcesoSiguiente=PINT_P, ProcesoSiguiente="Pintura",
+        FilaWip(idComp=PT_ID, idProceso=PINT_P, Proceso="Pintura",
                 Etiquetas=2, Piezas=20),
     ]
 
@@ -401,7 +401,7 @@ def test_agrupacion_pasos_por_idProceso():
 def test_advertencia_wip_fuera_ruta():
     """WIP en proceso no listado en catalogo -> advertencia."""
     wip_extra = _wip_caso_ejemplo() + [
-        FilaWip(idComp=CA, idProcesoSiguiente=99, ProcesoSiguiente="Proceso Raro",
+        FilaWip(idComp=CA, idProceso=99, Proceso="Proceso Raro",
                 Etiquetas=1, Piezas=5),
     ]
     arbol = construir_arbol(
@@ -413,3 +413,61 @@ def test_advertencia_wip_fuera_ruta():
         almacen_wip_nombre=ALM_WIP_NOMBRE,
     )
     assert any("Ca" in w and "99" in w for w in arbol.advertencias)
+
+
+def test_liberadas_e_inspeccion_no_afectan_req_paso():
+    """Las métricas Liberadas y En Inspección son solo display: no descuentan
+    demanda. Solo el bucket "Por procesar" (Piezas) alimenta el netteo.
+
+    Construye 2 escenarios con el mismo WIP "Por procesar" pero uno con
+    Liberadas=999 y Inspección=999. Los `req_paso` y `req_neto` deben ser
+    idénticos.
+    """
+    wip_baseline = _wip_caso_ejemplo()
+    wip_con_extras = [
+        FilaWip(idComp=CB, idProceso=SOLDADURA, Proceso="Soldadura",
+                Etiquetas=1, Piezas=1,
+                EtiquetasLiberadas=9, PiezasLiberadas=999,
+                EtiquetasInspeccion=9, PiezasInspeccion=999),
+        FilaWip(idComp=CA, idProceso=ALM_WIP_ID, Proceso=ALM_WIP_NOMBRE,
+                Etiquetas=1, Piezas=2,
+                EtiquetasLiberadas=9, PiezasLiberadas=999,
+                EtiquetasInspeccion=9, PiezasInspeccion=999),
+        FilaWip(idComp=CC, idProceso=ALM_WIP_ID, Proceso=ALM_WIP_NOMBRE,
+                Etiquetas=1, Piezas=1,
+                EtiquetasLiberadas=9, PiezasLiberadas=999,
+                EtiquetasInspeccion=9, PiezasInspeccion=999),
+    ]
+
+    def _construir(wip):
+        return construir_arbol(
+            demanda_filas=_demanda(req_pt=1),
+            bom_filas=_bom(),
+            ruta_filas=_rutas(),
+            wip_filas=wip,
+            almacen_wip_id=ALM_WIP_ID,
+            almacen_wip_nombre=ALM_WIP_NOMBRE,
+        )
+
+    arbol_a = _construir(wip_baseline)
+    arbol_b = _construir(wip_con_extras)
+    nodos_a = {n.idComp: n for n in arbol_a.componentes}
+    nodos_b = {n.idComp: n for n in arbol_b.componentes}
+
+    for idComp in (CP, CB, CA, CC):
+        assert nodos_a[idComp].req_neto == nodos_b[idComp].req_neto
+        assert nodos_a[idComp].wip_total == nodos_b[idComp].wip_total
+        pasos_a = nodos_a[idComp].ruta
+        pasos_b = nodos_b[idComp].ruta
+        assert len(pasos_a) == len(pasos_b)
+        for pa, pb in zip(pasos_a, pasos_b):
+            assert pa.req_paso == pb.req_paso
+            assert pa.wip_en_paso == pb.wip_en_paso
+
+    # Hidratación correcta de campos display en el escenario con extras
+    cb_b = nodos_b[CB]
+    paso_sold = next(p for p in cb_b.ruta if p.idProceso == SOLDADURA)
+    assert paso_sold.liberadas == 999
+    assert paso_sold.etiquetas_liberadas == 9
+    assert paso_sold.en_inspeccion == 999
+    assert paso_sold.etiquetas_inspeccion == 9

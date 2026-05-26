@@ -103,12 +103,24 @@ def construir_arbol(
     if pt_root_id is None:
         raise ValueError("No se encontro el PT raiz en tblBomExplosionado (IdPadre=NULL).")
 
-    # ---- WIP por componente y por (componente, proceso siguiente) ------------
+    # ---- WIP por componente y por (componente, proceso) ---------------------
+    # Solo el bucket "Por procesar" (Piezas/Etiquetas) alimenta el netteo.
+    # Liberadas / Inspección son solo display y no descuentan demanda.
     wip_total: dict[int, float] = defaultdict(float)
     wip_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    liberadas_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    inspeccion_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_inspeccion_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     for fw in wip_filas:
         wip_total[fw.idComp] += fw.Piezas
-        wip_por_paso[(fw.idComp, fw.idProcesoSiguiente)] += fw.Piezas
+        wip_por_paso[(fw.idComp, fw.idProceso)] += fw.Piezas
+        etiquetas_por_paso[(fw.idComp, fw.idProceso)] += fw.Etiquetas
+        liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasLiberadas
+        etiquetas_liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasLiberadas
+        inspeccion_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasInspeccion
+        etiquetas_inspeccion_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasInspeccion
 
     # ---- Orden topologico (Kahn): asegura padres antes que hijos -------------
     orden = _topological_sort(pt_root_id, hijos_de, padres_de)
@@ -146,6 +158,11 @@ def construir_arbol(
             idComp=idComp,
             ruta=rutas_by_comp.get(idComp, []),
             wip_por_paso=wip_por_paso,
+            etiquetas_por_paso=etiquetas_por_paso,
+            liberadas_por_paso=liberadas_por_paso,
+            etiquetas_liberadas_por_paso=etiquetas_liberadas_por_paso,
+            inspeccion_por_paso=inspeccion_por_paso,
+            etiquetas_inspeccion_por_paso=etiquetas_inspeccion_por_paso,
             req_bruto=req_bruto[idComp],
             es_pt=es_pt,
             almacen_wip_id=almacen_wip_id,
@@ -231,6 +248,11 @@ def _construir_pasos(
     idComp: int,
     ruta: list[FilaRuta],
     wip_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_por_paso: dict[tuple[int, int | None], int],
+    liberadas_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int],
+    inspeccion_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_inspeccion_por_paso: dict[tuple[int, int | None], int],
     req_bruto: float,
     es_pt: bool,
     almacen_wip_id: int,
@@ -241,9 +263,10 @@ def _construir_pasos(
     Reglas:
     1. **Agrupar por idProceso**: si una ruta tiene varios sub-pasos con el mismo
        ``idProceso`` (ej. Soldadura Robot + Soldadura Limpieza, ambos idProceso=6),
-       se colapsan en un solo PasoRuta. El WIP en ``tblEtiqueta`` esta indexado por
-       ``idProcesoSiguiente`` (sin idRuta), asi que solo hay un valor de WIP por
-       (componente, idProceso) — agrupar evita contar el mismo WIP varias veces.
+       se colapsan en un solo PasoRuta. El WIP en ``tblEtiqueta`` (bucket
+       "Por procesar") esta indexado por ``idProcesoSiguiente`` (sin idRuta),
+       asi que solo hay un valor de WIP por (componente, idProceso) — agrupar
+       evita contar el mismo WIP varias veces.
     2. **Para intermedios** se agrega un PasoRuta virtual ``Almacen WIP`` al final
        que representa el buffer donde el componente espera consumo por el padre.
        La capa visual lo usa para llenar la card del componente y no lo renderiza
@@ -251,7 +274,8 @@ def _construir_pasos(
     3. **Formula req_paso** (validada contra diagrama del usuario):
        ``req_paso[i] = req_bruto - sum(WIP en pasos i, i+1, ..., final)``
        Las piezas en este paso ya completaron los previos -> no se cuentan en el
-       requerimiento upstream.
+       requerimiento upstream. Solo el bucket "Por procesar" (wip_en_paso) entra
+       a esta formula — Liberadas / Inspección son solo display.
     """
     # Agrupar por idProceso preservando el orden de primera aparicion
     grupos: list[tuple[int, FilaRuta, list[str]]] = []
@@ -265,7 +289,7 @@ def _construir_pasos(
 
     pasos: list[PasoRuta] = []
     for orden, (idProc, primer_fr, sub_rutas) in enumerate(grupos, start=1):
-        wip_paso = wip_por_paso.get((idComp, idProc), 0.0)
+        key = (idComp, idProc)
         ruta_label = " / ".join(sub_rutas) if len(sub_rutas) > 1 else primer_fr.Ruta
         pasos.append(PasoRuta(
             orden=orden,
@@ -274,13 +298,18 @@ def _construir_pasos(
             ruta=ruta_label,
             idPlanta=primer_fr.IdPlanta,
             es_virtual=False,
-            wip_en_paso=wip_paso,
+            wip_en_paso=wip_por_paso.get(key, 0.0),
+            etiquetas_en_paso=etiquetas_por_paso.get(key, 0),
+            liberadas=liberadas_por_paso.get(key, 0.0),
+            etiquetas_liberadas=etiquetas_liberadas_por_paso.get(key, 0),
+            en_inspeccion=inspeccion_por_paso.get(key, 0.0),
+            etiquetas_inspeccion=etiquetas_inspeccion_por_paso.get(key, 0),
             req_paso=0.0,
             label="",
         ))
 
     if not es_pt:
-        wip_virt = wip_por_paso.get((idComp, almacen_wip_id), 0.0)
+        key_virt = (idComp, almacen_wip_id)
         pasos.append(PasoRuta(
             orden=len(pasos) + 1,
             idProceso=almacen_wip_id,
@@ -288,7 +317,14 @@ def _construir_pasos(
             ruta=None,
             idPlanta=None,
             es_virtual=True,
-            wip_en_paso=wip_virt,
+            wip_en_paso=wip_por_paso.get(key_virt, 0.0),
+            etiquetas_en_paso=etiquetas_por_paso.get(key_virt, 0),
+            # Liberadas / Inspección no aplican al Almacén WIP virtual (idProceso=16
+            # es un proceso de catálogo, no físico — no genera bUltimoProceso=1).
+            liberadas=0.0,
+            etiquetas_liberadas=0,
+            en_inspeccion=0.0,
+            etiquetas_inspeccion=0,
             req_paso=0.0,
             label="",
         ))
