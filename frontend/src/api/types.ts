@@ -43,12 +43,22 @@ export interface PasoRuta {
   idPlanta: number | null;
   es_virtual: boolean;
   req_paso: number;
-  wip_en_paso: number;          // bucket "Por procesar" (alimenta el netteo)
+  // wip_en_paso = disponibles + recibidas (lo que aun debe pasar por X);
+  // unico que alimenta el netteo.
+  wip_en_paso: number;
   etiquetas_en_paso: number;
-  liberadas: number;            // bUltimoProceso=1 ∧ estatus LIBERADO (solo display)
+  // Desglose display del WIP que aun debe pasar por X
+  disponibles: number;         // estatus=LIBERADO, sig=X, ubic <> X
+  etiquetas_disponibles: number;
+  recibidas: number;           // estatus=LIBERADO, sig=X, ubic = X
+  etiquetas_recibidas: number;
+  // Salidas de X (solo display)
+  liberadas: number;           // estatus=LIBERADO, procActual=X, sig <> X
   etiquetas_liberadas: number;
-  en_inspeccion: number;        // bUltimoProceso=1 ∧ estatus POR INSPECCION (solo display)
+  en_inspeccion: number;       // estatus=POR INSPECCION, procActual=X
   etiquetas_inspeccion: number;
+  retrabajo: number;           // estatus=POR RETRABAJO, procActual=X
+  etiquetas_retrabajo: number;
   label: string;
 }
 
@@ -86,9 +96,16 @@ export type Mode = "inventario" | "requerimiento";
 export interface BloqueProceso {
   idProceso: number | null;
   Proceso: string;
+  // Buckets sobre estatus=LIBERADO
+  Disponibles: number;      // sig=X, ubic <> X
+  Recibidas: number;        // sig=X, ubic = X
+  PorTransferir: number;    // prev=X, sig <> X
+  // Buckets sobre otros estatus de salida de X
+  Inspeccion: number;       // estatus=POR INSPECCION, prev=X
+  Retrabajo: number;        // estatus=POR RETRABAJO, prev=X
+  // Totales del bloque
   Etiquetas: number;
-  Piezas: number;
-  Componentes: number;
+  Materiales: number;       // antes 'Componentes' — ahora COUNT DISTINCT idMaterial
   Plantas: number;
 }
 
@@ -97,9 +114,15 @@ export interface PTEnProceso {
   PT: string;
   DescripcionPT: string | null;
   ComponentesEnProceso: number;
-  PiezasEnProceso: number;
   EtiquetasEnProceso: number;
+  Disponibles: number;
+  Recibidas: number;
+  PorTransferir: number;
 }
+
+// Metrica activa del drill-down de PTs bajo un bloque seleccionado.
+// El badge del PT y el orden del listado se renderizan segun esta seleccion.
+export type DrilldownMetric = "disponibles" | "recibidas" | "por_transferir" | "total";
 
 export interface Planta {
   idPlanta: number;

@@ -24,15 +24,19 @@ export function SummaryView() {
   const setProcesoFiltro = useUiStore((s) => s.setProcesoFiltro);
 
   const totales = useMemo(() => {
-    if (!bloques) return { piezas: 0, etiquetas: 0, procesos: 0 };
+    if (!bloques) {
+      return { piezas: 0, etiquetas: 0, procesos: 0 };
+    }
     let piezas = 0;
     let etiquetas = 0;
     for (const b of bloques) {
-      piezas += b.Piezas;
+      piezas += b.Disponibles + b.Recibidas + b.PorTransferir;
       etiquetas += b.Etiquetas;
     }
     return { piezas, etiquetas, procesos: bloques.length };
   }, [bloques]);
+
+  const showSkeleton = isLoading || (isFetching && !bloques);
 
   return (
     <div className="h-full overflow-y-auto bg-surface-muted">
@@ -40,7 +44,7 @@ export function SummaryView() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-ink">
-              Inventario por proceso destino
+              Inventario por proceso
             </h2>
           </div>
           {bloques ? (
@@ -93,8 +97,8 @@ export function SummaryView() {
       </header>
 
       <div className="p-6">
-        {isLoading ? (
-          <div className="text-sm text-ink-muted">Cargando bloques...</div>
+        {showSkeleton ? (
+          <BloquesSkeleton />
         ) : error ? (
           <div className="text-sm text-status-empty">
             Error al cargar: {(error as Error).message}
@@ -105,7 +109,13 @@ export function SummaryView() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {bloques.map((b) => (
+            {[...bloques]
+              .sort(
+                (a, b) =>
+                  b.Disponibles + b.Recibidas + b.PorTransferir -
+                  (a.Disponibles + a.Recibidas + a.PorTransferir),
+              )
+              .map((b) => (
               <ProcessBlock
                 key={b.idProceso ?? `null-${b.Proceso}`}
                 bloque={b}
@@ -237,6 +247,8 @@ function ProcessBlock({
   onClick: () => void;
 }) {
   const isNull = bloque.idProceso === null;
+  const inventarioTotal =
+    bloque.Disponibles + bloque.Recibidas + bloque.PorTransferir;
   return (
     <button
       type="button"
@@ -261,24 +273,142 @@ function ProcessBlock({
           </span>
         ) : null}
       </div>
-      <div className="mt-3 text-2xl font-semibold tabular-nums text-ink">
-        {fmtInt(bloque.Piezas)}
+
+      {/* Inventario total = Disponibles + Recibidas + PorTransferir */}
+      <div className="mt-3">
+        <div
+          className="text-2xl font-semibold tabular-nums leading-tight text-ink"
+          title={`${fmtInt(inventarioTotal)} piezas en el proceso`}
+        >
+          {fmtInt(inventarioTotal)}
+        </div>
+        <div className="text-[10px] uppercase tracking-wide text-ink-subtle mt-0.5">
+          Inventario total
+        </div>
       </div>
-      <div className="text-[11px] text-ink-subtle">piezas</div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-ink-muted">
-        <Meta value={fmtInt(bloque.Etiquetas)} label="etiq." />
-        <Meta value={fmtInt(bloque.Componentes)} label="comp." />
-        <Meta value={fmtInt(bloque.Plantas)} label="plt." />
+
+      {/* Las 3 metricas principales (mutuamente excluyentes por etiqueta) */}
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Metric
+          value={bloque.Disponibles}
+          label="Disponibles"
+          colorClass="text-status-covered"
+        />
+        <Metric
+          value={bloque.Recibidas}
+          label="Recibidas"
+          colorClass="text-status-partial"
+        />
+        <Metric
+          value={bloque.PorTransferir}
+          label="Por transferir"
+          colorClass="text-status-pt"
+        />
+      </div>
+
+      {/* Meta: etiquetas, materiales, plantas */}
+      <div className="mt-4 flex items-center gap-3 text-[11px] text-ink-subtle">
+        <MetaInline value={bloque.Etiquetas} label="etiq." />
+        <span aria-hidden="true">·</span>
+        <MetaInline value={bloque.Materiales} label="mat." />
+        <span aria-hidden="true">·</span>
+        <MetaInline value={bloque.Plantas} label="plt." />
+      </div>
+
+      {/* Pie reservado siempre (alinea verticalmente todos los bloques) */}
+      <div className="mt-2 pt-2 border-t border-surface-border flex items-center gap-1.5 text-[10px] min-h-[1.25rem]">
+        {bloque.Inspeccion > 0 ? (
+          <span className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-empty/10 text-status-empty font-medium tabular-nums">
+            <DotIcon className="w-1.5 h-1.5" />
+            {fmtInt(bloque.Inspeccion)} insp.
+          </span>
+        ) : null}
+        {bloque.Retrabajo > 0 ? (
+          <span className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-partial/10 text-status-partial font-medium tabular-nums">
+            <DotIcon className="w-1.5 h-1.5" />
+            {fmtInt(bloque.Retrabajo)} retrab.
+          </span>
+        ) : null}
       </div>
     </button>
   );
 }
 
-function Meta({ value, label }: { value: string; label: string }) {
+function Metric({
+  value,
+  label,
+  colorClass,
+}: {
+  value: number;
+  label: string;
+  colorClass: string;
+}) {
   return (
-    <div className="flex flex-col">
-      <span className="tabular-nums font-medium text-ink">{value}</span>
-      <span className="text-[10px] text-ink-subtle">{label}</span>
+    <div className="min-w-0">
+      <div
+        className={`text-xl font-semibold tabular-nums leading-tight truncate ${colorClass}`}
+        title={fmtInt(value)}
+      >
+        {fmtInt(value)}
+      </div>
+      <div className="text-[10px] uppercase tracking-wide text-ink-subtle mt-0.5">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function MetaInline({ value, label }: { value: number; label: string }) {
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="tabular-nums font-medium text-ink-muted">
+        {fmtInt(value)}
+      </span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function DotIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 8 8"
+      fill="currentColor"
+      aria-hidden="true"
+      className={className}
+    >
+      <circle cx="4" cy="4" r="4" />
+    </svg>
+  );
+}
+
+function BloquesSkeleton() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-lg border border-surface-border bg-white p-4 shadow-soft animate-pulse"
+        >
+          <div className="h-4 w-2/3 rounded bg-surface-subtle" />
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <div>
+              <div className="h-6 w-12 rounded bg-surface-subtle" />
+              <div className="h-2 w-10 rounded bg-surface-subtle mt-2" />
+            </div>
+            <div>
+              <div className="h-6 w-12 rounded bg-surface-subtle" />
+              <div className="h-2 w-10 rounded bg-surface-subtle mt-2" />
+            </div>
+            <div>
+              <div className="h-6 w-12 rounded bg-surface-subtle" />
+              <div className="h-2 w-10 rounded bg-surface-subtle mt-2" />
+            </div>
+          </div>
+          <div className="mt-4 h-2.5 w-1/2 rounded bg-surface-subtle" />
+        </div>
+      ))}
     </div>
   );
 }

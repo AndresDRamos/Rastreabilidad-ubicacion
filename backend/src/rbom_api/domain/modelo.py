@@ -84,25 +84,39 @@ class FilaRuta(_Base):
 
 
 class FilaWip(_Base):
-    """WIP por (componente, proceso) en 3 buckets.
+    """WIP por (componente, proceso) en 5 buckets.
 
-    - `Piezas` / `Etiquetas` = bucket "Por procesar" (idProcesoSiguiente == idProceso,
-      estatus LIBERADO). Único bucket que alimenta el netteo (compat con el
-      contrato previo donde el WIP venía agrupado por idProcesoSiguiente).
-    - `PiezasLiberadas` / `EtiquetasLiberadas` = piezas que ya salieron del proceso
-      (bUltimoProceso=1 ∧ estatus LIBERADO). Solo display.
-    - `PiezasInspeccion` / `EtiquetasInspeccion` = piezas que pasaron por el proceso
-      y aún están en QC (bUltimoProceso=1 ∧ estatus POR INSPECCION). Solo display.
+    Compat con el netteo:
+    - `Piezas` / `Etiquetas` = Disponibles + Recibidas (lo que aun debe pasar
+      por X). Es el conjunto que alimenta el netteo via `wip_en_paso`.
+
+    Desglose display (no afecta el netteo):
+    - `PiezasDisponibles` / `EtiquetasDisponibles` = estatus=LIBERADO, sig=X,
+      ubicacion <> X (espera entrar, fisicamente fuera de X).
+    - `PiezasRecibidas` / `EtiquetasRecibidas` = estatus=LIBERADO, sig=X,
+      ubicacion = X (ya esta fisicamente en X).
+    - `PiezasLiberadas` / `EtiquetasLiberadas` = piezas que ya salieron de X
+      (procesoActual=X, sig <> X). Reemplaza al viejo "Liberadas".
+    - `PiezasInspeccion` / `EtiquetasInspeccion` = bUltimoProceso=X ∧ estatus
+      POR INSPECCION.
+    - `PiezasRetrabajo` / `EtiquetasRetrabajo` = bUltimoProceso=X ∧ estatus
+      POR RETRABAJO.
     """
     idComp: int
     idProceso: Optional[int] = None
     Proceso: str
     Etiquetas: int = 0
     Piezas: float = 0.0
+    EtiquetasDisponibles: int = 0
+    PiezasDisponibles: float = 0.0
+    EtiquetasRecibidas: int = 0
+    PiezasRecibidas: float = 0.0
     EtiquetasLiberadas: int = 0
     PiezasLiberadas: float = 0.0
     EtiquetasInspeccion: int = 0
     PiezasInspeccion: float = 0.0
+    EtiquetasRetrabajo: int = 0
+    PiezasRetrabajo: float = 0.0
 
 
 # ---------- Salida JSON: arbol netteado --------------------------------------
@@ -121,12 +135,22 @@ class PasoRuta(_Base):
     idPlanta: Optional[int] = None
     es_virtual: bool = False
     req_paso: float = 0.0           # piezas que aun deben pasar por este step
-    wip_en_paso: float = 0.0        # piezas con idProcesoSiguiente = idProceso_de_este_paso
-    etiquetas_en_paso: int = 0      # conteo de etiquetas del bucket "Por procesar"
-    liberadas: float = 0.0          # piezas que YA salieron de este proceso (bUltimoProceso=1, LIBERADO)
+    # wip_en_paso = Disponibles + Recibidas (suma compat con el netteo).
+    # Es el unico campo que descuenta req_paso.
+    wip_en_paso: float = 0.0
+    etiquetas_en_paso: int = 0
+    # Desglose display del WIP que aun debe pasar por X
+    disponibles: float = 0.0        # estatus=LIBERADO, sig=X, ubic <> X
+    etiquetas_disponibles: int = 0
+    recibidas: float = 0.0          # estatus=LIBERADO, sig=X, ubic = X
+    etiquetas_recibidas: int = 0
+    # Salidas de X (solo display)
+    liberadas: float = 0.0          # estatus=LIBERADO, procActual=X, sig <> X
     etiquetas_liberadas: int = 0
-    en_inspeccion: float = 0.0      # piezas en QC de este proceso (bUltimoProceso=1, POR INSPECCION)
+    en_inspeccion: float = 0.0      # estatus=POR INSPECCION, procActual=X
     etiquetas_inspeccion: int = 0
+    retrabajo: float = 0.0          # estatus=POR RETRABAJO, procActual=X
+    etiquetas_retrabajo: int = 0
     label: str = ""                 # ej. "Doblez (120 de 200)"
 
 
@@ -161,28 +185,45 @@ class ArbolPT(_Base):
 # ---------- Vista Resumen: bloques por proceso ------------------------------
 
 class BloqueProceso(_Base):
-    """Una fila por proceso destino (idProcesoSiguiente) con totales de WIP.
+    """Una fila por "proceso X" con los 5 conteos de WIP que reflejan estados
+    del flujo alrededor de X (ver Q_bloques.sql para reglas exactas).
 
-    Alimenta las tarjetas del dashboard "Resumen". Las etiquetas ya
-    remisionadas estan excluidas — ver Q_bloques.sql.
+    Una misma etiqueta puede aparecer en dos bloques distintos (como
+    "PorTransferir" en X y como "Disponibles/Recibidas" en Y), pero dentro de
+    un mismo bloque cae en una sola categoria.
     """
     idProceso: Optional[int] = None
     Proceso: str
+    # Buckets sobre estatus=LIBERADO (idEstatusEtiqueta=2)
+    Disponibles: float       # sig=X, ubic <> X (esperando entrar, no llego)
+    Recibidas: float         # sig=X, ubic = X (ya esta fisicamente en X)
+    PorTransferir: float     # prev=X, sig <> X (X la libero)
+    # Buckets sobre otros estatus de salida de X
+    Inspeccion: float        # estatus=POR INSPECCION, prev=X
+    Retrabajo: float         # estatus=POR RETRABAJO, prev=X
+    # Totales del bloque (DISTINCT sobre la union de las 5 categorias)
     Etiquetas: int
-    Piezas: float
-    Componentes: int
+    Materiales: int          # COUNT DISTINCT idMaterial (antes 'Componentes')
     Plantas: int
 
 
 class PTEnProceso(_Base):
-    """Un PT cuyos componentes tienen WIP esperando entrar al proceso
-    seleccionado en el drill-down de la vista Resumen."""
+    """Un PT cuyos componentes tienen WIP asociado al proceso seleccionado en
+    el drill-down de la vista Resumen.
+
+    Devuelve las 3 metricas principales por PT (Disponibles, Recibidas,
+    PorTransferir) -- Insp/Retr no se desglosan a nivel PT. El badge del PT
+    en frontend renderiza una de esas tres segun la metrica elegida por el
+    usuario.
+    """
     idPT: int
     PT: str
     DescripcionPT: Optional[str] = None
     ComponentesEnProceso: int
-    PiezasEnProceso: float
     EtiquetasEnProceso: int
+    Disponibles: float
+    Recibidas: float
+    PorTransferir: float
 
 
 class Planta(_Base):

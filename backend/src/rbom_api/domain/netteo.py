@@ -104,23 +104,35 @@ def construir_arbol(
         raise ValueError("No se encontro el PT raiz en tblBomExplosionado (IdPadre=NULL).")
 
     # ---- WIP por componente y por (componente, proceso) ---------------------
-    # Solo el bucket "Por procesar" (Piezas/Etiquetas) alimenta el netteo.
-    # Liberadas / Inspección son solo display y no descuentan demanda.
+    # Solo el bucket Piezas (Disponibles + Recibidas) alimenta el netteo.
+    # Liberadas / Inspección / Retrabajo son solo display y no descuentan demanda.
     wip_total: dict[int, float] = defaultdict(float)
     wip_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    disponibles_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_disponibles_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    recibidas_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_recibidas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     liberadas_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     inspeccion_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_inspeccion_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    retrabajo_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_retrabajo_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     for fw in wip_filas:
         wip_total[fw.idComp] += fw.Piezas
         wip_por_paso[(fw.idComp, fw.idProceso)] += fw.Piezas
         etiquetas_por_paso[(fw.idComp, fw.idProceso)] += fw.Etiquetas
+        disponibles_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasDisponibles
+        etiquetas_disponibles_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasDisponibles
+        recibidas_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasRecibidas
+        etiquetas_recibidas_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasRecibidas
         liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasLiberadas
         etiquetas_liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasLiberadas
         inspeccion_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasInspeccion
         etiquetas_inspeccion_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasInspeccion
+        retrabajo_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasRetrabajo
+        etiquetas_retrabajo_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasRetrabajo
 
     # ---- Orden topologico (Kahn): asegura padres antes que hijos -------------
     orden = _topological_sort(pt_root_id, hijos_de, padres_de)
@@ -159,10 +171,16 @@ def construir_arbol(
             ruta=rutas_by_comp.get(idComp, []),
             wip_por_paso=wip_por_paso,
             etiquetas_por_paso=etiquetas_por_paso,
+            disponibles_por_paso=disponibles_por_paso,
+            etiquetas_disponibles_por_paso=etiquetas_disponibles_por_paso,
+            recibidas_por_paso=recibidas_por_paso,
+            etiquetas_recibidas_por_paso=etiquetas_recibidas_por_paso,
             liberadas_por_paso=liberadas_por_paso,
             etiquetas_liberadas_por_paso=etiquetas_liberadas_por_paso,
             inspeccion_por_paso=inspeccion_por_paso,
             etiquetas_inspeccion_por_paso=etiquetas_inspeccion_por_paso,
+            retrabajo_por_paso=retrabajo_por_paso,
+            etiquetas_retrabajo_por_paso=etiquetas_retrabajo_por_paso,
             req_bruto=req_bruto[idComp],
             es_pt=es_pt,
             almacen_wip_id=almacen_wip_id,
@@ -249,10 +267,16 @@ def _construir_pasos(
     ruta: list[FilaRuta],
     wip_por_paso: dict[tuple[int, int | None], float],
     etiquetas_por_paso: dict[tuple[int, int | None], int],
+    disponibles_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_disponibles_por_paso: dict[tuple[int, int | None], int],
+    recibidas_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_recibidas_por_paso: dict[tuple[int, int | None], int],
     liberadas_por_paso: dict[tuple[int, int | None], float],
     etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int],
     inspeccion_por_paso: dict[tuple[int, int | None], float],
     etiquetas_inspeccion_por_paso: dict[tuple[int, int | None], int],
+    retrabajo_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_retrabajo_por_paso: dict[tuple[int, int | None], int],
     req_bruto: float,
     es_pt: bool,
     almacen_wip_id: int,
@@ -300,10 +324,16 @@ def _construir_pasos(
             es_virtual=False,
             wip_en_paso=wip_por_paso.get(key, 0.0),
             etiquetas_en_paso=etiquetas_por_paso.get(key, 0),
+            disponibles=disponibles_por_paso.get(key, 0.0),
+            etiquetas_disponibles=etiquetas_disponibles_por_paso.get(key, 0),
+            recibidas=recibidas_por_paso.get(key, 0.0),
+            etiquetas_recibidas=etiquetas_recibidas_por_paso.get(key, 0),
             liberadas=liberadas_por_paso.get(key, 0.0),
             etiquetas_liberadas=etiquetas_liberadas_por_paso.get(key, 0),
             en_inspeccion=inspeccion_por_paso.get(key, 0.0),
             etiquetas_inspeccion=etiquetas_inspeccion_por_paso.get(key, 0),
+            retrabajo=retrabajo_por_paso.get(key, 0.0),
+            etiquetas_retrabajo=etiquetas_retrabajo_por_paso.get(key, 0),
             req_paso=0.0,
             label="",
         ))
@@ -319,12 +349,22 @@ def _construir_pasos(
             es_virtual=True,
             wip_en_paso=wip_por_paso.get(key_virt, 0.0),
             etiquetas_en_paso=etiquetas_por_paso.get(key_virt, 0),
-            # Liberadas / Inspección no aplican al Almacén WIP virtual (idProceso=16
-            # es un proceso de catálogo, no físico — no genera bUltimoProceso=1).
+            # En el Almacen WIP virtual asumimos que todo el "wip_en_paso" esta
+            # fisicamente en el almacen -> contribuye a "Recibidas" para fines
+            # de display. Disponibles = 0 (no hay "en transito" hacia almacen).
+            disponibles=0.0,
+            etiquetas_disponibles=0,
+            recibidas=wip_por_paso.get(key_virt, 0.0),
+            etiquetas_recibidas=etiquetas_por_paso.get(key_virt, 0),
+            # Liberadas / Inspeccion / Retrabajo no aplican al Almacen WIP
+            # virtual (idProceso=16 es de catalogo, no fisico -> no genera
+            # bUltimoProceso=1).
             liberadas=0.0,
             etiquetas_liberadas=0,
             en_inspeccion=0.0,
             etiquetas_inspeccion=0,
+            retrabajo=0.0,
+            etiquetas_retrabajo=0,
             req_paso=0.0,
             label="",
         ))

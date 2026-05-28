@@ -6,17 +6,19 @@ import { fmtInt, fmtPlanta } from "@/lib/format";
 
 type Props = NodeProps<Node<ProcessNodeData>>;
 
-/** Tarjeta de un paso de la ruta de fabricación.
+/** Tarjeta de un paso de la ruta de fabricacion.
  *
- * Muestra tres ángulos del proceso, independientes del toggle Inv/Req del
- * componente padre:
- *   - Por procesar : piezas LIBERADAS del proceso anterior, esperando entrar.
- *                    (= `wipEnPaso`, el bucket que alimenta el netteo.)
- *   - Liberadas    : piezas que YA salieron de este proceso y esperan al siguiente.
- *   - En Inspección: piezas que pasaron por este proceso y están en QC.
+ * Mismo modelo que las cards del Resumen:
+ *   - "Inventario total" (numero grande)    = disponibles + recibidas + liberadas
+ *     [Solo disponibles + recibidas alimentan el netteo; liberadas es display.]
+ *   - 3 metricas: Disponibles / Recibidas / Por transferir
+ *   - Pie condicional: badges "Insp." y "Retrab." si > 0
  */
 export function ProcessNode({ data }: Props) {
+  const total = data.disponibles + data.recibidas + data.liberadas;
   const cubierto = data.reqPaso <= 0;
+  const hasFooter = data.enInspeccion > 0 || data.retrabajo > 0;
+
   const borderCls = data.highlighted
     ? "border-status-pt"
     : cubierto
@@ -31,7 +33,7 @@ export function ProcessNode({ data }: Props) {
 
   return (
     <div
-      className={`rounded-lg bg-white border ${borderCls} ${highlightCls} overflow-hidden w-[220px] transition-shadow`}
+      className={`rounded-lg bg-white border ${borderCls} ${highlightCls} overflow-hidden w-[240px] transition-shadow`}
     >
       <Handle
         type="source"
@@ -81,23 +83,56 @@ export function ProcessNode({ data }: Props) {
           </div>
         ) : null}
 
+        {/* Inventario total */}
+        <div className="mt-2">
+          <div
+            className={`text-lg font-semibold tabular-nums leading-tight ${
+              total > 0 ? "text-ink" : "text-ink-subtle"
+            }`}
+          >
+            {fmtInt(total)}
+          </div>
+          <div className="text-[10px] uppercase tracking-wide text-ink-subtle">
+            Inventario total
+          </div>
+        </div>
+
+        {/* Desglose en 3 metricas */}
         <div className="mt-2 grid grid-cols-3 gap-1.5">
           <Metric
-            value={data.wipEnPaso}
-            label="Por procesar"
+            value={data.disponibles}
+            label="Disp."
             colorCls="text-status-covered"
           />
           <Metric
-            value={data.enInspeccion}
-            label="En Inspección"
+            value={data.recibidas}
+            label="Recib."
             colorCls="text-status-partial"
           />
           <Metric
             value={data.liberadas}
-            label="Liberadas"
+            label="Trans."
             colorCls="text-status-pt"
           />
         </div>
+
+        {/* Pie condicional: Inspeccion / Retrabajo */}
+        {hasFooter ? (
+          <div className="mt-2 pt-2 border-t border-surface-border flex items-center gap-1.5 text-[10px]">
+            {data.enInspeccion > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-status-empty/10 text-status-empty font-medium tabular-nums">
+                <Dot />
+                {fmtInt(data.enInspeccion)} insp.
+              </span>
+            ) : null}
+            {data.retrabajo > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-status-partial/10 text-status-partial font-medium tabular-nums">
+                <Dot />
+                {fmtInt(data.retrabajo)} retrab.
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -112,11 +147,12 @@ interface MetricProps {
 function Metric({ value, label, colorCls }: MetricProps) {
   const dim = value <= 0;
   return (
-    <div className="flex flex-col leading-none">
+    <div className="flex flex-col leading-none min-w-0">
       <span
-        className={`text-base font-semibold tabular-nums ${
+        className={`text-sm font-semibold tabular-nums truncate ${
           dim ? "text-ink-subtle" : colorCls
         }`}
+        title={String(value)}
       >
         {fmtInt(value)}
       </span>
@@ -126,5 +162,19 @@ function Metric({ value, label, colorCls }: MetricProps) {
         {label}
       </span>
     </div>
+  );
+}
+
+function Dot() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 8 8"
+      fill="currentColor"
+      aria-hidden="true"
+      className="w-1.5 h-1.5"
+    >
+      <circle cx="4" cy="4" r="4" />
+    </svg>
   );
 }

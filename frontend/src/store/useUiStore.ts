@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Mode } from "@/api/types";
+import type { DrilldownMetric, Mode } from "@/api/types";
 
 export interface UiFilters {
   clienteId: number | null;    // null = sin filtro (todos los clientes)
@@ -36,6 +36,10 @@ interface UiStore {
   // Filtro por proceso (drill-down desde Resumen). null = sin filtro.
   procesoFiltro: ProcesoFiltro | null;
 
+  // Metrica activa del drill-down (Disponibles / Recibidas / Por transferir).
+  // Determina el badge mostrado en cada PT y el criterio de orden de la lista.
+  drilldownMetric: DrilldownMetric;
+
   // Modo de visualizacion y filtros del sidebar (client-side)
   mode: Mode;
   expanded: Set<number>;             // idComp expandidos en el canvas
@@ -52,6 +56,7 @@ interface UiStore {
   setFilter: <K extends keyof UiFilters>(key: K, value: UiFilters[K]) => void;
   setVentana: (v: number) => void;
   setProcesoFiltro: (p: ProcesoFiltro | null) => void;
+  setDrilldownMetric: (m: DrilldownMetric) => void;
   clearSelection: () => void;
 }
 
@@ -61,6 +66,7 @@ export const useUiStore = create<UiStore>((set) => ({
   activeTabId: null,
   ventana: 3,
   procesoFiltro: null,
+  drilldownMetric: "disponibles",
 
   mode: "inventario",
   expanded: new Set(),
@@ -131,5 +137,6 @@ export const useUiStore = create<UiStore>((set) => ({
 
   setVentana: (v) => set({ ventana: v }),
   setProcesoFiltro: (p) => set({ procesoFiltro: p }),
+  setDrilldownMetric: (m) => set({ drilldownMetric: m }),
   clearSelection: () => set({ selectedPtIds: [], activeTabId: null, view: "summary" }),
 }));

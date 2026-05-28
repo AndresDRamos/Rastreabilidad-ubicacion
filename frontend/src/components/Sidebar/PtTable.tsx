@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { usePts, usePtsEnProceso } from "@/api/queries";
-import type { FilaListado } from "@/api/types";
+import type { DrilldownMetric, FilaListado, PTEnProceso } from "@/api/types";
 import { useUiStore } from "@/store/useUiStore";
 import { PartThumbnail } from "@/components/Canvas/nodes/PartThumbnail";
 
 const PAGE_SIZE = 25;
+
+const METRIC_OPTIONS: { value: DrilldownMetric; label: string; short: string }[] = [
+  { value: "total", label: "Inventario total", short: "total" },
+  { value: "disponibles", label: "Disponibles", short: "disp." },
+  { value: "recibidas", label: "Recibidas", short: "recib." },
+  { value: "por_transferir", label: "Por transferir", short: "trans." },
+];
 
 function fmtInt(n: number): string {
   return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(n);
@@ -16,10 +23,25 @@ function matchesFilter(value: string, query: string): boolean {
   return value.toLowerCase().includes(query.toLowerCase());
 }
 
+function pickMetric(pt: PTEnProceso, m: DrilldownMetric): number {
+  switch (m) {
+    case "disponibles":
+      return pt.Disponibles;
+    case "recibidas":
+      return pt.Recibidas;
+    case "por_transferir":
+      return pt.PorTransferir;
+    case "total":
+      return pt.Disponibles + pt.Recibidas + pt.PorTransferir;
+  }
+}
+
 export function PtTable() {
   const ventana = useUiStore((s) => s.ventana);
   const filters = useUiStore((s) => s.filters);
   const procesoFiltro = useUiStore((s) => s.procesoFiltro);
+  const drilldownMetric = useUiStore((s) => s.drilldownMetric);
+  const setDrilldownMetric = useUiStore((s) => s.setDrilldownMetric);
 
   const { data: filas, isLoading, error } = usePts(ventana, filters.fechaMax);
   const { data: ptsEnProceso, isLoading: loadingProceso } = usePtsEnProceso(
@@ -35,13 +57,14 @@ export function PtTable() {
   const togglePt = useUiStore((s) => s.togglePt);
   const [page, setPage] = useState(0);
 
-  // Lookup: idPT -> piezas en el proceso seleccionado (para badge en cada row).
-  const piezasPorPt = useMemo<Map<number, number>>(() => {
+  // Lookup: idPT -> valor de la metrica activa en el proceso seleccionado
+  // (para badge en cada row). Cuando no hay drill activo el map queda vacio.
+  const metricaPorPt = useMemo<Map<number, number>>(() => {
     if (!procesoFiltro || !ptsEnProceso) return new Map();
     const m = new Map<number, number>();
-    for (const p of ptsEnProceso) m.set(p.idPT, p.PiezasEnProceso);
+    for (const p of ptsEnProceso) m.set(p.idPT, pickMetric(p, drilldownMetric));
     return m;
-  }, [procesoFiltro, ptsEnProceso]);
+  }, [procesoFiltro, ptsEnProceso, drilldownMetric]);
 
   const filasFiltradas = useMemo<FilaListado[]>(() => {
     if (!filas) return [];
@@ -63,10 +86,10 @@ export function PtTable() {
       : base;
 
     if (procesoFiltro) {
-      // Ordenar por piezas en proceso DESC cuando hay drill activo.
+      // Ordenar por la metrica activa DESC cuando hay drill activo.
       return filtradas.sort((a, b) => {
-        const pa = piezasPorPt.get(a.idMaterial) ?? 0;
-        const pb = piezasPorPt.get(b.idMaterial) ?? 0;
+        const pa = metricaPorPt.get(a.idMaterial) ?? 0;
+        const pb = metricaPorPt.get(b.idMaterial) ?? 0;
         if (pb !== pa) return pb - pa;
         return b.PiezasPend - a.PiezasPend;
       });
@@ -77,7 +100,7 @@ export function PtTable() {
       }
       return b.PiezasPend - a.PiezasPend;
     });
-  }, [filas, filters, procesoFiltro, ptsEnProceso, piezasPorPt]);
+  }, [filas, filters, procesoFiltro, ptsEnProceso, metricaPorPt]);
 
   const totales = useMemo(() => {
     let req = 0;
@@ -113,6 +136,9 @@ export function PtTable() {
     );
   }
 
+  const metricShort =
+    METRIC_OPTIONS.find((o) => o.value === drilldownMetric)?.short ?? "pzs";
+
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="px-4 py-2 bg-surface-muted/80 backdrop-blur-sm border-b border-surface-border flex items-center justify-between gap-2 text-xs">
@@ -125,6 +151,24 @@ export function PtTable() {
           </span>
         ) : null}
       </div>
+
+      {procesoFiltro !== null ? (
+        <div className="px-4 py-2 border-b border-surface-border bg-status-pt/5 flex items-center gap-2 text-xs">
+          <span className="text-ink-muted">Ordenar y mostrar por</span>
+          <select
+            value={drilldownMetric}
+            onChange={(e) => setDrilldownMetric(e.target.value as DrilldownMetric)}
+            className="h-7 px-2 pr-7 text-xs rounded-md border border-surface-border bg-white text-ink focus:outline-none focus:ring-2 focus:ring-status-pt/30 focus:border-status-pt/50 transition"
+            aria-label="Metrica de orden del drill-down"
+          >
+            {METRIC_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       {filasFiltradas.length === 0 ? (
         <div className="px-4 py-6 text-sm text-ink-muted">
@@ -139,9 +183,10 @@ export function PtTable() {
               <PtRow
                 key={`${f.idMaterial}-${f.idCliente ?? "x"}-${f.idCiudad ?? "x"}`}
                 fila={f}
-                piezasEnProceso={
-                  procesoFiltro ? piezasPorPt.get(f.idMaterial) ?? 0 : null
+                metricaValor={
+                  procesoFiltro ? metricaPorPt.get(f.idMaterial) ?? 0 : null
                 }
+                metricaShort={metricShort}
                 procesoNombre={procesoFiltro?.nombre ?? null}
                 checked={selectedPtIds.includes(f.idMaterial)}
                 onToggle={() => togglePt(f.idMaterial)}
@@ -186,13 +231,15 @@ export function PtTable() {
 
 function PtRow({
   fila,
-  piezasEnProceso,
+  metricaValor,
+  metricaShort,
   procesoNombre,
   checked,
   onToggle,
 }: {
   fila: FilaListado;
-  piezasEnProceso: number | null;
+  metricaValor: number | null;
+  metricaShort: string;
   procesoNombre: string | null;
   checked: boolean;
   onToggle: () => void;
@@ -233,12 +280,12 @@ function PtRow({
               <span className="text-sm font-semibold tabular-nums text-ink">
                 {fmtInt(fila.PiezasPend)}
               </span>
-              {piezasEnProceso !== null ? (
+              {metricaValor !== null ? (
                 <span
                   className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums bg-status-pt/10 text-status-pt"
-                  title={`${fmtInt(piezasEnProceso)} pzs esperando ${procesoNombre}`}
+                  title={`${fmtInt(metricaValor)} ${metricaShort} en ${procesoNombre}`}
                 >
-                  {fmtInt(piezasEnProceso)} en {procesoNombre}
+                  {fmtInt(metricaValor)} {metricaShort}
                 </span>
               ) : fila.PiezasPastDue > 0 ? (
                 <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums bg-status-empty/10 text-status-empty">
