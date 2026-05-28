@@ -33,10 +33,7 @@ export function Sidebar() {
       >
         <header className="px-4 pt-4 pb-2 flex items-start justify-between gap-2">
           <div>
-            <h1 className="text-sm font-semibold text-ink">Rastreabilidad BOM</h1>
-            <p className="text-xs text-ink-subtle mt-0.5">
-              PTs con demanda activa (ventana 3 meses)
-            </p>
+            <h1 className="text-sm font-semibold text-ink">Rastreabilidad</h1>
           </div>
           <button
             type="button"
