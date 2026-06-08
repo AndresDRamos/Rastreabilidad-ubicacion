@@ -19,9 +19,11 @@ import structlog
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, Query
 
+from fastapi import HTTPException
+
 from ..deps import get_conn
 from ..domain import db
-from ..domain.modelo import BloqueProceso, Planta, PTEnProceso
+from ..domain.modelo import BloqueProceso, EtiquetaDetalle, Planta, PTEnProceso
 
 
 router = APIRouter(prefix="/api", tags=["bloques"])
@@ -183,6 +185,102 @@ def get_pts_en_proceso(
     with _lock:
         _cache_pts[key] = pts
     return pts
+
+
+_BUCKET_WHITELIST = {
+    "Disponibles",
+    "Recibidas",
+    "PorTransferir",
+    "Inspeccion",
+    "Retrabajo",
+}
+
+# Cache (idProceso, bucket, filtros) — los detalles cambian igual de seguido
+# que los bloques; TTL 2 min coincide con el resto de la vista Resumen.
+_CacheKeyEtiq = tuple[
+    int, str, int | None, int | None,
+    tuple[int, ...], tuple[int, ...], tuple[int, ...],
+]
+_cache_etiquetas: TTLCache[_CacheKeyEtiq, list[EtiquetaDetalle]] = TTLCache(
+    maxsize=512, ttl=120
+)
+
+
+@router.get(
+    "/bloques/{idProceso}/etiquetas",
+    response_model=list[EtiquetaDetalle],
+)
+def get_etiquetas_detalle(
+    idProceso: int,
+    bucket: Annotated[
+        str,
+        Query(description="Disponibles | Recibidas | PorTransferir | Inspeccion | Retrabajo"),
+    ],
+    cliente: Annotated[int | None, Query(ge=1)] = None,
+    planta: Annotated[int | None, Query(ge=1)] = None,
+    ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
+    tipos_material: Annotated[
+        str | None,
+        Query(description="CSV de idTipoMaterial (PT=1, Intermedio=3)"),
+    ] = None,
+    clases: Annotated[
+        str | None,
+        Query(description="CSV de idClase NetSuit (CLASS_ID_ARTCULO_ID)"),
+    ] = None,
+    conn: pyodbc.Connection = Depends(get_conn),
+) -> list[EtiquetaDetalle]:
+    if bucket not in _BUCKET_WHITELIST:
+        raise HTTPException(
+            status_code=400,
+            detail=f"bucket invalido. Debe ser uno de {sorted(_BUCKET_WHITELIST)}",
+        )
+
+    ids_ciudad = _parse_int_csv(ciudades)
+    ids_tipo = _parse_int_csv(tipos_material)
+    ids_clase = _parse_int_csv(clases)
+    key: _CacheKeyEtiq = (
+        idProceso,
+        bucket,
+        cliente,
+        planta,
+        tuple(sorted(ids_ciudad)),
+        tuple(sorted(ids_tipo)),
+        tuple(sorted(ids_clase)),
+    )
+    with _lock:
+        cached = _cache_etiquetas.get(key)
+    if cached is not None:
+        return cached
+
+    t0 = time.perf_counter()
+    rows = db.fetch_etiquetas_detalle(
+        conn,
+        id_proceso=idProceso,
+        bucket=bucket,
+        id_cliente=cliente,
+        id_planta=planta,
+        ids_ciudad=ids_ciudad or None,
+        ids_tipo_material=ids_tipo or None,
+        ids_clase=ids_clase or None,
+    )
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log.info(
+        "db_query",
+        query="Q_etiquetas_detalle",
+        id_proceso=idProceso,
+        bucket=bucket,
+        cliente=cliente,
+        planta=planta,
+        ciudades=ids_ciudad,
+        tipos_material=ids_tipo,
+        clases=ids_clase,
+        rows=len(rows),
+        duration_ms=round(elapsed_ms, 2),
+    )
+    etiquetas = [EtiquetaDetalle(**r) for r in rows]
+    with _lock:
+        _cache_etiquetas[key] = etiquetas
+    return etiquetas
 
 
 @router.get("/plantas", response_model=list[Planta])

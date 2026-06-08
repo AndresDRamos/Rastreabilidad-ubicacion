@@ -230,3 +230,22 @@ class Planta(_Base):
     """Alimenta el selector de planta en la vista Resumen."""
     idPlanta: int
     NombrePlanta: str
+
+
+class EtiquetaDetalle(_Base):
+    """Una fila por etiqueta que compone un bucket de un bloque de la vista
+    Resumen (drill-down dentro del drawer lateral)."""
+    idEtiqueta: int
+    idMaterial: int
+    ClaveMaterial: str
+    DescripcionMaterial: Optional[str] = None
+    cantidad: float
+    idPlanta: Optional[int] = None
+    NombrePlanta: Optional[str] = None
+    procesoActual: Optional[int] = None
+    UltimoProceso: Optional[str] = None
+    idProcesoSiguiente: Optional[int] = None
+    SiguienteProceso: Optional[str] = None
+    procesoUbicacion: Optional[int] = None
+    UbicacionProceso: Optional[str] = None
+    ubicacionNombre: Optional[str] = None

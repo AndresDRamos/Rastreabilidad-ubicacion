@@ -167,6 +167,36 @@ def fetch_pts_en_proceso(conn: pyodbc.Connection,
     return rows
 
 
+def fetch_etiquetas_detalle(conn: pyodbc.Connection,
+                            id_proceso: int,
+                            bucket: str,
+                            id_cliente: int | None = None,
+                            id_planta: int | None = None,
+                            ids_ciudad: list[int] | None = None,
+                            ids_tipo_material: list[int] | None = None,
+                            ids_clase: list[int] | None = None) -> list[dict[str, Any]]:
+    """Lee Q_etiquetas_detalle.sql — etiquetas que componen el bucket dado."""
+    sql = _leer_sql("Q_etiquetas_detalle.sql")
+    sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
+    sql = sql.replace("/*CLASE_FILTER*/", _clase_predicate(ids_clase))
+    con_filtro = 1 if (id_cliente is not None or ids_ciudad or ids_clase) else 0
+    # bucket viene validado contra una whitelist en el router.
+    bucket_lit = bucket.replace("'", "''")
+    sql_param = (
+        _decl_int("idProcesoSelected", id_proceso)
+        + f"DECLARE @bucket varchar(20) = '{bucket_lit}';\n"
+        + _decl_int("idCliente", id_cliente)
+        + _decl_int("idPlantaFiltro", id_planta)
+        + f"DECLARE @conFiltroUniverso bit = {con_filtro};\n"
+    ) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
 def fetch_plantas(conn: pyodbc.Connection) -> list[dict[str, Any]]:
     """Lee Q_plantas.sql — lista de plantas con WIP activo."""
     sql = _leer_sql("Q_plantas.sql")
@@ -190,7 +220,8 @@ def _strip_param_declarations(sql: str) -> str:
            or stripped.startswith("declare @idplantafiltro") \
            or stripped.startswith("declare @idprocesoselected") \
            or stripped.startswith("declare @idcliente") \
-           or stripped.startswith("declare @confiltrouniverso"):
+           or stripped.startswith("declare @confiltrouniverso") \
+           or stripped.startswith("declare @bucket"):
             continue
         keep.append(line)
     return "\n".join(keep)
