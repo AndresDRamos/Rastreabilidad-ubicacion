@@ -21,6 +21,7 @@ dist/
 # Node / frontend
 node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # Build artefacts del frontend que se copian al backend para deploy
 backend/src/rbom_api/static/
