@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 
 import { useBloques, usePlantas } from "@/api/queries";
-import type { BloqueProceso } from "@/api/types";
+import type { BloqueBucket, BloqueProceso } from "@/api/types";
 import { fmtInt } from "@/lib/format";
 import { useUiStore } from "@/store/useUiStore";
+import { EtiquetasDrawer } from "./EtiquetasDrawer";
 import { TipoMaterialSelect } from "./TipoMaterialSelect";
 
 export function SummaryView() {
@@ -22,6 +23,7 @@ export function SummaryView() {
   );
   const procesoFiltro = useUiStore((s) => s.procesoFiltro);
   const setProcesoFiltro = useUiStore((s) => s.setProcesoFiltro);
+  const setBloqueDetalle = useUiStore((s) => s.setBloqueDetalle);
 
   const totales = useMemo(() => {
     if (!bloques) {
@@ -138,11 +140,20 @@ export function SummaryView() {
                     });
                   }
                 }}
+                onOpenDetail={(bucket) => {
+                  if (b.idProceso === null) return;
+                  setBloqueDetalle({
+                    idProceso: b.idProceso,
+                    nombreProceso: b.Proceso,
+                    bucket,
+                  });
+                }}
               />
             ))}
           </div>
         )}
       </div>
+      <EtiquetasDrawer />
     </div>
   );
 }
@@ -241,19 +252,38 @@ function ProcessBlock({
   bloque,
   selected,
   onClick,
+  onOpenDetail,
 }: {
   bloque: BloqueProceso;
   selected: boolean;
   onClick: () => void;
+  onOpenDetail: (bucket: BloqueBucket) => void;
 }) {
   const isNull = bloque.idProceso === null;
   const inventarioTotal =
     bloque.Disponibles + bloque.Recibidas + bloque.PorTransferir;
+
+  const handleBodyClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isNull) return;
+    // Si el click vino de un boton interno (Metric/badge), no togglear el filtro.
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-bucket-button]")) return;
+    onClick();
+  };
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={isNull}
+    <div
+      role={isNull ? undefined : "button"}
+      tabIndex={isNull ? undefined : 0}
+      onClick={handleBodyClick}
+      onKeyDown={(e) => {
+        if (isNull) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      aria-pressed={selected}
       className={`group text-left rounded-lg border bg-white p-4 shadow-soft transition ${
         selected
           ? "border-status-pt ring-2 ring-status-pt/20"
@@ -289,20 +319,26 @@ function ProcessBlock({
 
       {/* Las 3 metricas principales (mutuamente excluyentes por etiqueta) */}
       <div className="mt-3 grid grid-cols-3 gap-2">
-        <Metric
+        <MetricButton
           value={bloque.Disponibles}
           label="Disponibles"
           colorClass="text-status-covered"
+          onClick={() => onOpenDetail("Disponibles")}
+          disabled={isNull || bloque.Disponibles <= 0}
         />
-        <Metric
+        <MetricButton
           value={bloque.Recibidas}
           label="Recibidas"
           colorClass="text-status-partial"
+          onClick={() => onOpenDetail("Recibidas")}
+          disabled={isNull || bloque.Recibidas <= 0}
         />
-        <Metric
+        <MetricButton
           value={bloque.PorTransferir}
           label="Por transferir"
           colorClass="text-status-pt"
+          onClick={() => onOpenDetail("PorTransferir")}
+          disabled={isNull || bloque.PorTransferir <= 0}
         />
       </div>
 
@@ -318,43 +354,80 @@ function ProcessBlock({
       {/* Pie reservado siempre (alinea verticalmente todos los bloques) */}
       <div className="mt-2 pt-2 border-t border-surface-border flex items-center gap-1.5 text-[10px] min-h-[1.25rem]">
         {bloque.Inspeccion > 0 ? (
-          <span className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-empty/10 text-status-empty font-medium tabular-nums">
+          <button
+            type="button"
+            data-bucket-button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDetail("Inspeccion");
+            }}
+            className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-empty/10 text-status-empty font-medium tabular-nums hover:bg-status-empty/20 transition"
+          >
             <DotIcon className="w-1.5 h-1.5" />
             {fmtInt(bloque.Inspeccion)} insp.
-          </span>
+          </button>
         ) : null}
         {bloque.Retrabajo > 0 ? (
-          <span className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-partial/10 text-status-partial font-medium tabular-nums">
+          <button
+            type="button"
+            data-bucket-button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDetail("Retrabajo");
+            }}
+            className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-partial/10 text-status-partial font-medium tabular-nums hover:bg-status-partial/20 transition"
+          >
             <DotIcon className="w-1.5 h-1.5" />
             {fmtInt(bloque.Retrabajo)} retrab.
-          </span>
+          </button>
         ) : null}
       </div>
-    </button>
+    </div>
   );
 }
 
-function Metric({
+function MetricButton({
   value,
   label,
   colorClass,
+  onClick,
+  disabled,
 }: {
   value: number;
   label: string;
   colorClass: string;
+  onClick: () => void;
+  disabled: boolean;
 }) {
   return (
-    <div className="min-w-0">
+    <button
+      type="button"
+      data-bucket-button
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) onClick();
+      }}
+      disabled={disabled}
+      title={
+        disabled
+          ? `${label}: sin etiquetas`
+          : `Ver etiquetas — ${label}`
+      }
+      className={`min-w-0 text-left rounded p-1 -m-1 transition ${
+        disabled ? "cursor-default" : "cursor-pointer hover:bg-surface-subtle"
+      }`}
+    >
       <div
-        className={`text-xl font-semibold tabular-nums leading-tight truncate ${colorClass}`}
-        title={fmtInt(value)}
+        className={`text-xl font-semibold tabular-nums leading-tight truncate ${
+          disabled ? "text-ink-subtle" : colorClass
+        }`}
       >
         {fmtInt(value)}
       </div>
       <div className="text-[10px] uppercase tracking-wide text-ink-subtle mt-0.5">
         {label}
       </div>
-    </div>
+    </button>
   );
 }
 

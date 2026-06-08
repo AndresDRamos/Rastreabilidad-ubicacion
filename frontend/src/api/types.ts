@@ -128,3 +128,28 @@ export interface Planta {
   idPlanta: number;
   NombrePlanta: string;
 }
+
+// Drill-down dentro del drawer lateral del bloque: una fila por etiqueta.
+export type BloqueBucket =
+  | "Disponibles"
+  | "Recibidas"
+  | "PorTransferir"
+  | "Inspeccion"
+  | "Retrabajo";
+
+export interface EtiquetaDetalle {
+  idEtiqueta: number;
+  idMaterial: number;
+  ClaveMaterial: string;
+  DescripcionMaterial: string | null;
+  cantidad: number;
+  idPlanta: number | null;
+  NombrePlanta: string | null;
+  procesoActual: number | null;
+  UltimoProceso: string | null;
+  idProcesoSiguiente: number | null;
+  SiguienteProceso: string | null;
+  procesoUbicacion: number | null;
+  UbicacionProceso: string | null;
+  ubicacionNombre: string | null;
+}

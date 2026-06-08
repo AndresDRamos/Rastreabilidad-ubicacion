@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { DrilldownMetric, Mode } from "@/api/types";
+import type { BloqueBucket, DrilldownMetric, Mode } from "@/api/types";
 
 export interface UiFilters {
   clienteId: number | null;    // null = sin filtro (todos los clientes)
@@ -15,6 +15,12 @@ export interface UiFilters {
 export interface ProcesoFiltro {
   idProceso: number;
   nombre: string;
+}
+
+export interface BloqueDetalleOpen {
+  idProceso: number;
+  nombreProceso: string;
+  bucket: BloqueBucket;
 }
 
 /**
@@ -40,6 +46,10 @@ interface UiStore {
   // Determina el badge mostrado en cada PT y el criterio de orden de la lista.
   drilldownMetric: DrilldownMetric;
 
+  // Drawer lateral derecho con el detalle de etiquetas de un bucket de un
+  // bloque del Resumen. null = cerrado.
+  bloqueDetalle: BloqueDetalleOpen | null;
+
   // Modo de visualizacion y filtros del sidebar (client-side)
   mode: Mode;
   expanded: Set<number>;             // idComp expandidos en el canvas
@@ -57,6 +67,7 @@ interface UiStore {
   setVentana: (v: number) => void;
   setProcesoFiltro: (p: ProcesoFiltro | null) => void;
   setDrilldownMetric: (m: DrilldownMetric) => void;
+  setBloqueDetalle: (d: BloqueDetalleOpen | null) => void;
   clearSelection: () => void;
 }
 
@@ -67,6 +78,7 @@ export const useUiStore = create<UiStore>((set) => ({
   ventana: 3,
   procesoFiltro: null,
   drilldownMetric: "disponibles",
+  bloqueDetalle: null,
 
   mode: "inventario",
   expanded: new Set(),
@@ -138,5 +150,6 @@ export const useUiStore = create<UiStore>((set) => ({
   setVentana: (v) => set({ ventana: v }),
   setProcesoFiltro: (p) => set({ procesoFiltro: p }),
   setDrilldownMetric: (m) => set({ drilldownMetric: m }),
+  setBloqueDetalle: (d) => set({ bloqueDetalle: d }),
   clearSelection: () => set({ selectedPtIds: [], activeTabId: null, view: "summary" }),
 }));

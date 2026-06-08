@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "./client";
 import type {
   ArbolPT,
+  BloqueBucket,
   BloqueProceso,
+  EtiquetaDetalle,
   FilaListado,
   Planta,
   PTEnProceso,
@@ -118,6 +120,50 @@ export function usePtsEnProceso(
       if (clases) params.clases = clases;
       const { data } = await apiClient.get<PTEnProceso[]>(
         `/bloques/${idProceso}/pts`,
+        { params },
+      );
+      return data;
+    },
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useEtiquetasDetalle(
+  idProceso: number | null,
+  bucket: BloqueBucket | null,
+  cliente: number | null = null,
+  planta: number | null = null,
+  ciudadIds: number[] = [],
+  tipoMaterialIds: number[] = [],
+  claseIds: number[] = [],
+) {
+  const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
+  const tiposKey = idsCsv(tipoMaterialIds) ?? "";
+  const clasesKey = idsCsv(claseIds) ?? "";
+  return useQuery<EtiquetaDetalle[]>({
+    queryKey: [
+      "etiquetas-detalle",
+      idProceso,
+      bucket,
+      cliente,
+      planta,
+      ciudadesKey,
+      tiposKey,
+      clasesKey,
+    ],
+    enabled: idProceso !== null && bucket !== null,
+    queryFn: async () => {
+      const params: Record<string, string | number> = { bucket: bucket! };
+      if (cliente != null) params.cliente = cliente;
+      if (planta != null) params.planta = planta;
+      const ciud = ciudadesCsv(ciudadIds);
+      if (ciud) params.ciudades = ciud;
+      const tipos = idsCsv(tipoMaterialIds);
+      if (tipos) params.tipos_material = tipos;
+      const clases = idsCsv(claseIds);
+      if (clases) params.clases = clases;
+      const { data } = await apiClient.get<EtiquetaDetalle[]>(
+        `/bloques/${idProceso}/etiquetas`,
         { params },
       );
       return data;
