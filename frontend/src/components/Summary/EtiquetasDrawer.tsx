@@ -1,24 +1,7 @@
 import { useEtiquetasDetalle } from "@/api/queries";
+import { BUCKET_COLOR, BUCKET_LABEL } from "@/components/ui/BucketRow";
 import { fmtInt } from "@/lib/format";
 import { useUiStore } from "@/store/useUiStore";
-
-const BUCKET_LABEL: Record<string, string> = {
-  Disponibles: "Disponibles",
-  Recibidas: "Recibidas",
-  PorTransferir: "Por transferir",
-  Inspeccion: "Inspección",
-  Retrabajo: "Retrabajo",
-  Encaminadas: "Encaminadas",
-};
-
-const BUCKET_COLOR: Record<string, string> = {
-  Disponibles: "text-status-covered",
-  Recibidas: "text-status-partial",
-  PorTransferir: "text-status-pt",
-  Inspeccion: "text-status-empty",
-  Retrabajo: "text-status-partial",
-  Encaminadas: "text-status-covered",
-};
 
 // Mensaje de "sin resultados" especifico por bucket.
 const BUCKET_EMPTY: Record<string, string> = {

@@ -3,28 +3,11 @@ import type { NodeProps, Node } from "@xyflow/react";
 
 import type { FlujoNodeData, FlujoVecino } from "@/lib/buildFlujo";
 import { fmtInt, fmtPlanta } from "@/lib/format";
+import { BucketBadge, Chevron } from "@/components/ui/BucketRow";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useUiStore } from "@/store/useUiStore";
 
 type Props = NodeProps<Node<FlujoNodeData>>;
-
-/** ">" — chevron que ilustra el avance del material de izquierda a derecha. */
-function Chevron() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-3 w-3 shrink-0 text-ink-subtle"
-      aria-hidden="true"
-    >
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  );
-}
 
 /** Lista de vecinos para el tooltip "viene de" / "va a". */
 function Vecinos({ titulo, items }: { titulo: string; items: FlujoVecino[] }) {
@@ -190,32 +173,24 @@ export function FlujoProcessNode({ data }: Props) {
         <div className="px-3 pb-2 -mt-1 flex items-center justify-center gap-2">
           {data.inspeccion > 0 ? (
             <Tooltip content="En inspeccion — material detenido en control de calidad. Click para ver etiquetas." side="bottom">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openDetalle("Inspeccion");
-                }}
-                className="nodrag inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-status-partial/15 text-status-partial text-[11px] font-semibold tabular-nums cursor-pointer transition hover:bg-status-partial/25"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-status-partial" />
-                {fmtInt(data.inspeccion)} inspección
-              </button>
+              <span className="inline-flex">
+                <BucketBadge
+                  value={data.inspeccion}
+                  bucket="Inspeccion"
+                  onClick={() => openDetalle("Inspeccion")}
+                />
+              </span>
             </Tooltip>
           ) : null}
           {data.retrabajo > 0 ? (
             <Tooltip content="Retrabajo — material rechazado que debe reprocesarse. Click para ver etiquetas." side="bottom">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openDetalle("Retrabajo");
-                }}
-                className="nodrag inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-status-empty/15 text-status-empty text-[11px] font-semibold tabular-nums cursor-pointer transition hover:bg-status-empty/25"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-status-empty" />
-                {fmtInt(data.retrabajo)} retrabajo
-              </button>
+              <span className="inline-flex">
+                <BucketBadge
+                  value={data.retrabajo}
+                  bucket="Retrabajo"
+                  onClick={() => openDetalle("Retrabajo")}
+                />
+              </span>
             </Tooltip>
           ) : null}
         </div>

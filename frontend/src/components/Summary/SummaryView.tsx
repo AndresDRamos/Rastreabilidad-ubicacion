@@ -2,6 +2,12 @@ import { useMemo } from "react";
 
 import { useBloques } from "@/api/queries";
 import type { BloqueBucket, BloqueProceso, ResumenMode } from "@/api/types";
+import {
+  BucketBadge,
+  BucketMetric,
+  BucketRow,
+  Chevron,
+} from "@/components/ui/BucketRow";
 import { fmtInt } from "@/lib/format";
 import { useUiStore } from "@/store/useUiStore";
 import { EtiquetasDrawer } from "./EtiquetasDrawer";
@@ -374,8 +380,6 @@ function ProcessBlock({
   onOpenDetail: (bucket: BloqueBucket) => void;
 }) {
   const isNull = bloque.idProceso === null;
-  const inventarioTotal =
-    bloque.Disponibles + bloque.Recibidas + bloque.PorTransferir;
 
   const handleBodyClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isNull) return;
@@ -421,37 +425,31 @@ function ProcessBlock({
       {/* Fila direccional (coherente con el nodo de Flujo): el material avanza
           Disponibles -> Recibidas -> Por transferir. Recibidas es el numero
           principal; los flancos son las entradas/salidas. */}
-      <div
-        className="mt-3 flex items-center justify-center gap-2"
-        title={`${fmtInt(inventarioTotal)} piezas en el proceso`}
-      >
-        <MetricButton
+      <BucketRow className="mt-3">
+        <BucketMetric
           value={bloque.Disponibles}
-          label="Disponibles"
-          colorClass="text-status-covered"
+          bucket="Disponibles"
           size="sm"
           onClick={() => onOpenDetail("Disponibles")}
-          disabled={isNull || bloque.Disponibles <= 0}
+          disabled={isNull}
         />
         <Chevron />
-        <MetricButton
+        <BucketMetric
           value={bloque.Recibidas}
-          label="Recibidas"
-          colorClass="text-ink"
+          bucket="Recibidas"
           size="lg"
           onClick={() => onOpenDetail("Recibidas")}
-          disabled={isNull || bloque.Recibidas <= 0}
+          disabled={isNull}
         />
         <Chevron />
-        <MetricButton
+        <BucketMetric
           value={bloque.PorTransferir}
-          label="Por transferir"
-          colorClass="text-status-pt"
+          bucket="PorTransferir"
           size="sm"
           onClick={() => onOpenDetail("PorTransferir")}
-          disabled={isNull || bloque.PorTransferir <= 0}
+          disabled={isNull}
         />
-      </div>
+      </BucketRow>
 
       {/* Meta: etiquetas, materiales */}
       <div className="mt-3 flex items-center justify-center gap-3 text-[11px] text-ink-subtle">
@@ -461,103 +459,23 @@ function ProcessBlock({
       </div>
 
       {/* Pie reservado siempre (alinea verticalmente todos los bloques) */}
-      <div className="mt-2 pt-2 border-t border-surface-border flex items-center justify-center gap-1.5 text-[10px] min-h-[1.25rem]">
+      <div className="mt-2 pt-2 border-t border-surface-border flex items-center justify-center gap-1.5 min-h-[1.25rem]">
         {bloque.Inspeccion > 0 ? (
-          <button
-            type="button"
-            data-bucket-button
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenDetail("Inspeccion");
-            }}
-            className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-empty/10 text-status-empty font-medium tabular-nums hover:bg-status-empty/20 transition"
-          >
-            <DotIcon className="w-1.5 h-1.5" />
-            {fmtInt(bloque.Inspeccion)} insp.
-          </button>
+          <BucketBadge
+            value={bloque.Inspeccion}
+            bucket="Inspeccion"
+            onClick={() => onOpenDetail("Inspeccion")}
+          />
         ) : null}
         {bloque.Retrabajo > 0 ? (
-          <button
-            type="button"
-            data-bucket-button
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenDetail("Retrabajo");
-            }}
-            className="inline-flex items-center gap-1 rounded px-1 py-px bg-status-partial/10 text-status-partial font-medium tabular-nums hover:bg-status-partial/20 transition"
-          >
-            <DotIcon className="w-1.5 h-1.5" />
-            {fmtInt(bloque.Retrabajo)} retrab.
-          </button>
+          <BucketBadge
+            value={bloque.Retrabajo}
+            bucket="Retrabajo"
+            onClick={() => onOpenDetail("Retrabajo")}
+          />
         ) : null}
       </div>
     </div>
-  );
-}
-
-function MetricButton({
-  value,
-  label,
-  colorClass,
-  onClick,
-  disabled,
-  size = "sm",
-}: {
-  value: number;
-  label: string;
-  colorClass: string;
-  onClick: () => void;
-  disabled: boolean;
-  size?: "sm" | "lg";
-}) {
-  const numberCls = size === "lg" ? "text-3xl font-bold" : "text-lg font-semibold";
-  return (
-    <button
-      type="button"
-      data-bucket-button
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!disabled) onClick();
-      }}
-      disabled={disabled}
-      title={
-        disabled
-          ? `${label}: sin etiquetas`
-          : `Ver etiquetas — ${label}`
-      }
-      className={`min-w-0 text-center rounded p-1 transition ${
-        disabled ? "cursor-default" : "cursor-pointer hover:bg-surface-subtle"
-      }`}
-    >
-      <div
-        className={`tabular-nums leading-tight truncate ${numberCls} ${
-          disabled ? "text-ink-subtle" : colorClass
-        }`}
-      >
-        {fmtInt(value)}
-      </div>
-      <div className="text-[10px] uppercase tracking-wide text-ink-subtle mt-0.5">
-        {label}
-      </div>
-    </button>
-  );
-}
-
-/** ">" — chevron que ilustra el avance del material (coherente con Flujo). */
-function Chevron() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-3 w-3 shrink-0 text-ink-subtle"
-      aria-hidden="true"
-    >
-      <path d="M9 6l6 6-6 6" />
-    </svg>
   );
 }
 
@@ -569,20 +487,6 @@ function MetaInline({ value, label }: { value: number; label: string }) {
       </span>
       <span>{label}</span>
     </span>
-  );
-}
-
-function DotIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 8 8"
-      fill="currentColor"
-      aria-hidden="true"
-      className={className}
-    >
-      <circle cx="4" cy="4" r="4" />
-    </svg>
   );
 }
 

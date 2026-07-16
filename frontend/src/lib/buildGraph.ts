@@ -8,7 +8,7 @@
 
 import type { Edge, Node } from "@xyflow/react";
 
-import type { ArbolPT, NodoComponente, PasoRuta } from "@/api/types";
+import type { ArbolPT, NodoComponente, PasoRuta, ReqUniverso } from "@/api/types";
 
 export type Status = "pt" | "covered" | "partial" | "empty" | "neutral";
 
@@ -52,6 +52,8 @@ export interface ComponentNodeData extends Record<string, unknown> {
   expanded: boolean;
   /** Total de piezas requeridas por ensamble del padre (suma de todas las aristas padre). */
   cantPadre: number;
+  /** Requerimiento del componente a traves de TODOS los PTs con demanda. */
+  reqUniverso: ReqUniverso | null;
 }
 
 export interface ProcessNodeData extends Record<string, unknown> {
@@ -208,6 +210,7 @@ export function buildGraph(
         expandable: pasosReales.length > 0,
         expanded: expanded.has(c.idComp),
         cantPadre: c.cantidad_ensamble_total,
+        reqUniverso: c.req_universo,
       },
     });
   }

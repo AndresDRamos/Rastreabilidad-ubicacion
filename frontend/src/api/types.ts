@@ -64,7 +64,25 @@ export interface PasoRuta {
 
 export interface AristaPadre {
   idPadre: number;
+  /** Cantidad LOCAL (piezas por unidad del padre), ya derivada de la acumulada. */
   cantidad_ensamble: number;
+}
+
+/**
+ * Requerimiento de un componente sumando TODOS los PTs con demanda que lo piden.
+ *
+ * NO cuadra con `NodoComponente.req_bruto` a proposito: el arbol abierto se
+ * atribuye el 100% del WIP fisico del componente, mientras que el universo
+ * reparte ese mismo WIP entre todos los PTs que lo reclaman. Cuando n_pts > 1
+ * la UI debe advertirlo.
+ */
+export interface ReqUniverso {
+  req_bruto_total: number;
+  req_neto_total: number;
+  wip_total: number;
+  n_pts: number;
+  pts: string[];
+  ciclico: boolean;
 }
 
 export interface NodoComponente {
@@ -81,6 +99,8 @@ export interface NodoComponente {
   cadena_ruta: string;
   padres: AristaPadre[];
   hijos: number[];
+  /** Requerimiento cross-PT. null si el universo no se pudo calcular. */
+  req_universo: ReqUniverso | null;
 }
 
 export interface ArbolPT {

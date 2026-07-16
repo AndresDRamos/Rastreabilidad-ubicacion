@@ -44,3 +44,6 @@ coverage.xml
 
 # Dev PID files
 .dev-pids.txt
+
+# Telemetria de sesiones de agentes (local)
+.claude/traces/

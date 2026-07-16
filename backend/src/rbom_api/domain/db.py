@@ -82,6 +82,46 @@ def fetch_detalle(conn: pyodbc.Connection, idPT: int,
     return result_sets[0], result_sets[1], result_sets[2], result_sets[3]
 
 
+def fetch_universo_req(conn: pyodbc.Connection,
+                       ventana_meses: int = 3,
+                       fecha_max: str | None = None) -> tuple[
+                           list[dict[str, Any]],  # DEMANDA por PT
+                           list[dict[str, Any]],  # ARISTAS deduplicadas
+                           list[dict[str, Any]],  # WIP por componente
+                           list[dict[str, Any]],  # PTS_POR_COMP
+                       ]:
+    """Lee Q_universo_req (4 result-sets) para el netteo cross-PT del bosque.
+
+    Sin filtro de universo (Caterpillar): el requerimiento total de un
+    componente es un hecho fisico del piso — depende de TODA la demanda activa,
+    no de que pestana tenga abierta el usuario. Filtrarlo daria un total parcial
+    que se leeria como total real.
+    """
+    sql = _leer_sql("Q_universo_req.sql")
+    if fecha_max:
+        # fecha_max viene validada como ISO yyyy-mm-dd desde el router (date).
+        fecha_decl = f"DECLARE @fecha_max date = '{fecha_max}';\n"
+    else:
+        fecha_decl = "DECLARE @fecha_max date = NULL;\n"
+    sql_param = (
+        f"DECLARE @ventana_meses int = {int(ventana_meses)};\n"
+        + fecha_decl
+    ) + _strip_param_declarations(sql)
+
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    result_sets: list[list[dict[str, Any]]] = []
+    while True:
+        result_sets.append(_rows_to_dicts(cursor))
+        if not cursor.nextset():
+            break
+    cursor.close()
+
+    while len(result_sets) < 4:
+        result_sets.append([])
+    return result_sets[0], result_sets[1], result_sets[2], result_sets[3]
+
+
 def _decl_int(name: str, value: int | None) -> str:
     if value is None:
         return f"DECLARE @{name} int = NULL;\n"

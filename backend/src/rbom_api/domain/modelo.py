@@ -119,6 +119,49 @@ class FilaWip(_Base):
     PiezasRetrabajo: float = 0.0
 
 
+# ---------- Result-sets de Q_universo_req.sql --------------------------------
+# Insumos del netteo CROSS-PT (bosque completo). Ver domain/universo_req.py.
+
+class FilaDemandaUniverso(_Base):
+    """Un PT raiz con demanda activa, ya agregada (sin desglose cliente/ciudad)."""
+    idMaterial: int
+    PT: str
+    PiezasPend: float
+
+
+class FilaAristaUniverso(_Base):
+    """Arista padre->hijo del bosque, YA deduplicada a nivel universo.
+
+    `tblBomExplosionado` repite la misma relacion una vez por cada PT en cuyo
+    arbol aparece; Q_universo_req.sql la colapsa antes de llegar aqui.
+    """
+    idPadre: int
+    idComp: int
+    CantidadEnsamble: float
+
+
+class FilaWipUniverso(_Base):
+    """WIP por componente (bucket "por procesar" = Disponibles + Recibidas)."""
+    idComp: int
+    Piezas: float = 0.0
+
+
+class ReqUniverso(_Base):
+    """Requerimiento de un componente sumando TODOS los PTs que lo demandan.
+
+    Convive con el requerimiento del arbol abierto (`NodoComponente.req_bruto`)
+    y **no cuadra con el**: el arbol se atribuye el 100% del WIP fisico del
+    componente, mientras que este reparte ese WIP entre todos los PTs que lo
+    reclaman. La UI debe advertirlo cuando `n_pts > 1`.
+    """
+    req_bruto_total: float      # demanda agregada de todos los padres, sin WIP
+    req_neto_total: float       # = max(0, req_bruto_total - wip_total)
+    wip_total: float            # WIP fisico del componente (se descuenta 1 vez)
+    n_pts: int                  # cuantos PT raiz lo demandan
+    pts: list[str] = Field(default_factory=list)  # claves de PT (tope 20)
+    ciclico: bool = False       # true si quedo en un ciclo del BOM (dato sucio)
+
+
 # ---------- Salida JSON: arbol netteado --------------------------------------
 
 class PasoRuta(_Base):
@@ -174,6 +217,10 @@ class NodoComponente(_Base):
     cadena_ruta: str = ""           # ej. "Corte (0 de 0) -> Doblez (120 de 200) -> ..."
     padres: list[AristaPadre] = Field(default_factory=list)
     hijos: list[int] = Field(default_factory=list)
+    # Requerimiento del componente a traves de TODOS los PTs con demanda (no
+    # solo este arbol). None si el universo no se pudo calcular. Ver
+    # domain/universo_req.py — no cuadra con req_bruto a proposito.
+    req_universo: Optional[ReqUniverso] = None
 
 
 class ArbolPT(_Base):
