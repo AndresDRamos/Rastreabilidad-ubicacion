@@ -79,11 +79,18 @@ def construir_arbol(
         )
 
     # ---- Indices del BOM -----------------------------------------------------
+    advertencias: list[str] = []
     pt_root_id: int | None = None
     info_comp: dict[int, FilaBom] = {}
     cantidad_ensamble_total: dict[int, float] = defaultdict(float)
     padres_de: dict[int, list[tuple[int, float]]] = defaultdict(list)
     hijos_de: dict[int, set[int]] = defaultdict(set)
+
+    # CantidadEnsamble viene ACUMULADA desde el PT raiz (ver _cantidad_local).
+    # Para derivar la local hace falta la cantidad de la fila EXACTA del padre,
+    # localizada por IdBomParent -> IdBom. No sirve `cantidad_ensamble_total`
+    # del padre: si el padre es shared, esa suma agrega sus varias apariciones.
+    cant_por_idbom: dict[int, float] = {fb.IdBom: fb.CantidadEnsamble for fb in bom_filas}
 
     for fb in bom_filas:
         if fb.IdPadre is None and fb.IdBomParent is None:
@@ -95,9 +102,12 @@ def construir_arbol(
             guardada = info_comp[fb.idComp]
             if fb.PrimerIdProceso is not None and guardada.PrimerIdProceso is None:
                 info_comp[fb.idComp] = fb
+        # Suma cruda de acumulados = piezas del componente por unidad de PT.
+        # Bajo la semantica acumulada esto SI tiene significado; no convertir a local.
         cantidad_ensamble_total[fb.idComp] += fb.CantidadEnsamble
         if fb.IdPadre is not None:
-            padres_de[fb.idComp].append((fb.IdPadre, fb.CantidadEnsamble))
+            local = _cantidad_local(fb, cant_por_idbom, advertencias)
+            padres_de[fb.idComp].append((fb.IdPadre, local))
             hijos_de[fb.IdPadre].add(fb.idComp)
 
     if pt_root_id is None:
@@ -160,7 +170,8 @@ def construir_arbol(
         lst.sort(key=lambda r: r.OrdenRuta)
 
     # ---- Construir nodos -----------------------------------------------------
-    advertencias: list[str] = []
+    # `advertencias` ya viene del indexado del BOM (puede traer avisos de
+    # cantidad de ensamble); aqui se le suman los outliers de WIP fuera de ruta.
     nodos: list[NodoComponente] = []
 
     for idComp in orden:
@@ -219,6 +230,55 @@ def construir_arbol(
         ))
 
     return ArbolPT(pt=pt_obj, componentes=nodos, advertencias=advertencias)
+
+
+def _cantidad_local(
+    fb: FilaBom,
+    cant_por_idbom: dict[int, float],
+    advertencias: list[str],
+) -> float:
+    """Deriva la cantidad de ensamble LOCAL (piezas de C por unidad de su padre).
+
+    `tblBomExplosionado.CantidadEnsamble` viene **acumulada desde el PT raiz**:
+    es cuantas piezas del componente lleva UNA unidad del PT, ya multiplicada por
+    los factores de todos los niveles superiores. La local se recupera dividiendo
+    entre la cantidad del padre.
+
+    Verificado contra BD real: la arista `92691847-A -> 92691848-A` aparece en 5
+    arboles con CantidadEnsamble 2 o 6 segun el factor de sus ancestros, pero la
+    local derivada da **2 en los 5 casos** — invariante, como corresponde a una
+    propiedad del par padre-hijo. En las 4,728 filas del universo de demanda la
+    division da entero exacto en el 100% de los casos.
+
+    El netteo necesita la LOCAL porque ya propaga el factor del padre via
+    `req_neto[padre]`. Usar la acumulada re-aplica ese factor y el error se
+    compone por nivel (medido: hasta 3x por nivel, en 15 PTs / 59 nodos).
+    """
+    if fb.IdBomParent is None:
+        return fb.CantidadEnsamble  # hijo directo de la raiz: acumulada == local
+
+    cant_padre = cant_por_idbom.get(fb.IdBomParent)
+    if cant_padre is None:
+        # El padre quedo fuera del filtro IdTipoMaterial IN (1,3). Ese nodo
+        # tampoco es alcanzable desde la raiz, asi que no deberia entrar al
+        # netteo; se devuelve la acumulada sin dividir en vez de asumir.
+        return fb.CantidadEnsamble
+    if cant_padre == 0:
+        advertencias.append(
+            f"{fb.Componente}: el padre (IdBom={fb.IdBomParent}) tiene "
+            f"CantidadEnsamble=0; no se pudo derivar la cantidad local "
+            f"(se usa la acumulada {_fmt(fb.CantidadEnsamble)})"
+        )
+        return fb.CantidadEnsamble
+
+    local = fb.CantidadEnsamble / cant_padre
+    # La division de floats mete ruido (ej. 0.30000000000000004). Si el valor
+    # esta a un pelo de un entero, se ajusta; si es genuinamente fraccionario
+    # (materiales por metro/kilo), se respeta tal cual.
+    entero = round(local)
+    if abs(local - entero) < 1e-6:
+        return float(entero)
+    return local
 
 
 def _topological_sort(
