@@ -11,6 +11,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 SQL_DIR = PACKAGE_DIR / "sql"
+# Raiz del monorepo: backend/src/rbom_api -> ../../.. = Rastreabilidad-app/
+REPO_ROOT = PACKAGE_DIR.parents[2]
 
 
 class Settings(BaseSettings):
@@ -34,6 +36,11 @@ class Settings(BaseSettings):
     # Dominio
     almacen_wip_proceso_id: int = 16
     almacen_wip_proceso_nombre: str = "Almacen WIP"
+
+    # Universo "Caterpillar Priority": archivo CSV con (ClaveMaterial, idMaterial)
+    # de los numeros criticos. Default = raiz del repo. Override via env
+    # NUMEROS_CRITICOS_PATH.
+    numeros_criticos_path: Path = REPO_ROOT / "NumerosCriticos.csv"
 
     # App
     log_level: str = "INFO"

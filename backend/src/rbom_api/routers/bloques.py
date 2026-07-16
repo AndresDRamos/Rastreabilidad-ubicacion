@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pyodbc
 import structlog
@@ -23,27 +23,61 @@ from fastapi import HTTPException
 
 from ..deps import get_conn
 from ..domain import db
-from ..domain.modelo import BloqueProceso, EtiquetaDetalle, Planta, PTEnProceso
+from ..domain.modelo import (
+    BloqueProceso,
+    EtiquetaDetalle,
+    FlujoPlantasResponse,
+    FlujoResponse,
+    Planta,
+    PTEnProceso,
+)
+from ..domain.universos import cargar_universo_caterpillar
 
 
 router = APIRouter(prefix="/api", tags=["bloques"])
 log = structlog.get_logger("rbom_api.routers.bloques")
 
+# Universos de filtrado (pestana del sidebar). "general" = sin filtro de
+# universo; "caterpillar" = solo los idMaterial del CSV de numeros criticos.
+Universo = Literal["general", "caterpillar"]
 
-# Cache compartido entre requests. Keys incluyen filtros para no devolver
-# datos cruzados entre clientes/plantas/ciudades/tipos de material distintos.
+
+def _universo_ids(universo: str) -> frozenset[int] | None:
+    """Resuelve el param `universo` a un set de idMaterial.
+
+    None = sin filtro (General). frozenset (posiblemente vacia) para Caterpillar:
+    el caller debe cortocircuitar a respuesta vacia cuando sea vacia, para no
+    devolver el universo completo por error."""
+    if universo == "caterpillar":
+        return cargar_universo_caterpillar()
+    return None
+
+
+# Cache compartido entre requests. Keys incluyen filtros (y el universo) para no
+# devolver datos cruzados entre clientes/plantas/ciudades/tipos/universos.
 _CacheKeyBloques = tuple[
-    int | None, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
+    str, int | None, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
 ]
 _CacheKeyPts = tuple[
-    int, int | None, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
+    str, int, int | None, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
 ]
+_CacheKeyFlujo = _CacheKeyBloques
 
 _cache_bloques: TTLCache[_CacheKeyBloques, list[BloqueProceso]] = TTLCache(
     maxsize=128, ttl=120
 )
 _cache_pts: TTLCache[_CacheKeyPts, list[PTEnProceso]] = TTLCache(
     maxsize=256, ttl=120
+)
+_cache_flujo: TTLCache[_CacheKeyFlujo, FlujoResponse] = TTLCache(
+    maxsize=128, ttl=120
+)
+# Overview por planta: misma clave que el flujo pero SIN planta (siempre todas).
+_CacheKeyFlujoPlantas = tuple[
+    str, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
+]
+_cache_flujo_plantas: TTLCache[_CacheKeyFlujoPlantas, FlujoPlantasResponse] = TTLCache(
+    maxsize=64, ttl=120
 )
 _cache_plantas: TTLCache[str, list[Planta]] = TTLCache(maxsize=1, ttl=600)
 _lock = threading.Lock()
@@ -82,12 +116,17 @@ def get_bloques(
         str | None,
         Query(description="CSV de idClase NetSuit (CLASS_ID_ARTCULO_ID)"),
     ] = None,
+    universo: Annotated[Universo, Query()] = "general",
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[BloqueProceso]:
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
+    uni = _universo_ids(universo)
+    if uni is not None and len(uni) == 0:
+        return []  # Caterpillar sin numeros criticos cargados
     key: _CacheKeyBloques = (
+        universo,
         cliente,
         planta,
         tuple(sorted(ids_ciudad)),
@@ -107,11 +146,13 @@ def get_bloques(
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
         ids_clase=ids_clase or None,
+        universo_ids=uni,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
         "db_query",
         query="Q_bloques",
+        universo=universo,
         cliente=cliente,
         planta=planta,
         ciudades=ids_ciudad,
@@ -124,6 +165,142 @@ def get_bloques(
     with _lock:
         _cache_bloques[key] = bloques
     return bloques
+
+
+@router.get("/flujo", response_model=FlujoResponse)
+def get_flujo(
+    cliente: Annotated[int | None, Query(ge=1)] = None,
+    planta: Annotated[int | None, Query(ge=1)] = None,
+    ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
+    tipos_material: Annotated[
+        str | None,
+        Query(description="CSV de idTipoMaterial (PT=1, Intermedio=3)"),
+    ] = None,
+    clases: Annotated[
+        str | None,
+        Query(description="CSV de idClase NetSuit (CLASS_ID_ARTCULO_ID)"),
+    ] = None,
+    universo: Annotated[Universo, Query()] = "general",
+    conn: pyodbc.Connection = Depends(get_conn),
+) -> FlujoResponse:
+    """Grafo de procesos conectados: bloques (proceso x planta) + aristas
+    (origen -> destino). Estructura desde la ruta, WIP sobrepuesto."""
+    ids_ciudad = _parse_int_csv(ciudades)
+    ids_tipo = _parse_int_csv(tipos_material)
+    ids_clase = _parse_int_csv(clases)
+    uni = _universo_ids(universo)
+    if uni is not None and len(uni) == 0:
+        return FlujoResponse(bloques=[], aristas=[])
+    key: _CacheKeyFlujo = (
+        universo,
+        cliente,
+        planta,
+        tuple(sorted(ids_ciudad)),
+        tuple(sorted(ids_tipo)),
+        tuple(sorted(ids_clase)),
+    )
+    with _lock:
+        cached = _cache_flujo.get(key)
+    if cached is not None:
+        return cached
+
+    t0 = time.perf_counter()
+    bloques_rows, aristas_rows = db.fetch_flujo(
+        conn,
+        id_cliente=cliente,
+        id_planta=planta,
+        ids_ciudad=ids_ciudad or None,
+        ids_tipo_material=ids_tipo or None,
+        ids_clase=ids_clase or None,
+        universo_ids=uni,
+    )
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log.info(
+        "db_query",
+        query="Q_flujo",
+        universo=universo,
+        cliente=cliente,
+        planta=planta,
+        ciudades=ids_ciudad,
+        tipos_material=ids_tipo,
+        clases=ids_clase,
+        rows_bloques=len(bloques_rows),
+        rows_aristas=len(aristas_rows),
+        duration_ms=round(elapsed_ms, 2),
+    )
+    flujo = FlujoResponse(
+        bloques=[r for r in bloques_rows],
+        aristas=[r for r in aristas_rows],
+    )
+    with _lock:
+        _cache_flujo[key] = flujo
+    return flujo
+
+
+@router.get("/flujo/plantas", response_model=FlujoPlantasResponse)
+def get_flujo_plantas(
+    cliente: Annotated[int | None, Query(ge=1)] = None,
+    ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
+    tipos_material: Annotated[
+        str | None,
+        Query(description="CSV de idTipoMaterial (PT=1, Intermedio=3)"),
+    ] = None,
+    clases: Annotated[
+        str | None,
+        Query(description="CSV de idClase NetSuit (CLASS_ID_ARTCULO_ID)"),
+    ] = None,
+    universo: Annotated[Universo, Query()] = "general",
+    conn: pyodbc.Connection = Depends(get_conn),
+) -> FlujoPlantasResponse:
+    """Overview nivel planta: un nodo por planta + aristas interplanta. No
+    acepta `planta` (muestra todas); el drill-in a una planta usa GET /flujo."""
+    ids_ciudad = _parse_int_csv(ciudades)
+    ids_tipo = _parse_int_csv(tipos_material)
+    ids_clase = _parse_int_csv(clases)
+    uni = _universo_ids(universo)
+    if uni is not None and len(uni) == 0:
+        return FlujoPlantasResponse(nodos=[], aristas=[])
+    key: _CacheKeyFlujoPlantas = (
+        universo,
+        cliente,
+        tuple(sorted(ids_ciudad)),
+        tuple(sorted(ids_tipo)),
+        tuple(sorted(ids_clase)),
+    )
+    with _lock:
+        cached = _cache_flujo_plantas.get(key)
+    if cached is not None:
+        return cached
+
+    t0 = time.perf_counter()
+    nodos_rows, aristas_rows = db.fetch_flujo_plantas(
+        conn,
+        id_cliente=cliente,
+        ids_ciudad=ids_ciudad or None,
+        ids_tipo_material=ids_tipo or None,
+        ids_clase=ids_clase or None,
+        universo_ids=uni,
+    )
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log.info(
+        "db_query",
+        query="Q_flujo_plantas",
+        universo=universo,
+        cliente=cliente,
+        ciudades=ids_ciudad,
+        tipos_material=ids_tipo,
+        clases=ids_clase,
+        rows_nodos=len(nodos_rows),
+        rows_aristas=len(aristas_rows),
+        duration_ms=round(elapsed_ms, 2),
+    )
+    flujo = FlujoPlantasResponse(
+        nodos=[r for r in nodos_rows],
+        aristas=[r for r in aristas_rows],
+    )
+    with _lock:
+        _cache_flujo_plantas[key] = flujo
+    return flujo
 
 
 @router.get("/bloques/{idProceso}/pts", response_model=list[PTEnProceso])
@@ -140,12 +317,17 @@ def get_pts_en_proceso(
         str | None,
         Query(description="CSV de idClase NetSuit (CLASS_ID_ARTCULO_ID)"),
     ] = None,
+    universo: Annotated[Universo, Query()] = "general",
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[PTEnProceso]:
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
+    uni = _universo_ids(universo)
+    if uni is not None and len(uni) == 0:
+        return []
     key: _CacheKeyPts = (
+        universo,
         idProceso,
         cliente,
         planta,
@@ -167,11 +349,13 @@ def get_pts_en_proceso(
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
         ids_clase=ids_clase or None,
+        universo_ids=uni,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
         "db_query",
         query="Q_pts_en_proceso",
+        universo=universo,
         id_proceso=idProceso,
         cliente=cliente,
         planta=planta,
@@ -193,12 +377,18 @@ _BUCKET_WHITELIST = {
     "PorTransferir",
     "Inspeccion",
     "Retrabajo",
+    "Encaminadas",
 }
+
+# Buckets de arista del Flujo (origen X -> destino Y) que admiten ?destino=:
+#   PorTransferir = material ya liberado de X hacia Y (arista con piezas).
+#   Encaminadas   = material aun en X cuya ruta apunta a Y (arista en cero).
+_BUCKETS_CON_DESTINO = {"PorTransferir", "Encaminadas"}
 
 # Cache (idProceso, bucket, filtros) — los detalles cambian igual de seguido
 # que los bloques; TTL 2 min coincide con el resto de la vista Resumen.
 _CacheKeyEtiq = tuple[
-    int, str, int | None, int | None,
+    str, int, str, int | None, int | None, int | None,
     tuple[int, ...], tuple[int, ...], tuple[int, ...],
 ]
 _cache_etiquetas: TTLCache[_CacheKeyEtiq, list[EtiquetaDetalle]] = TTLCache(
@@ -227,6 +417,11 @@ def get_etiquetas_detalle(
         str | None,
         Query(description="CSV de idClase NetSuit (CLASS_ID_ARTCULO_ID)"),
     ] = None,
+    universo: Annotated[Universo, Query()] = "general",
+    destino: Annotated[
+        int | None,
+        Query(ge=1, description="Con bucket=PorTransferir o Encaminadas: acota al proceso destino (arista del Flujo)"),
+    ] = None,
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[EtiquetaDetalle]:
     if bucket not in _BUCKET_WHITELIST:
@@ -238,11 +433,16 @@ def get_etiquetas_detalle(
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
+    uni = _universo_ids(universo)
+    if uni is not None and len(uni) == 0:
+        return []
     key: _CacheKeyEtiq = (
+        universo,
         idProceso,
         bucket,
         cliente,
         planta,
+        destino,
         tuple(sorted(ids_ciudad)),
         tuple(sorted(ids_tipo)),
         tuple(sorted(ids_clase)),
@@ -262,13 +462,17 @@ def get_etiquetas_detalle(
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
         ids_clase=ids_clase or None,
+        universo_ids=uni,
+        id_destino=destino if bucket in _BUCKETS_CON_DESTINO else None,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
         "db_query",
         query="Q_etiquetas_detalle",
+        universo=universo,
         id_proceso=idProceso,
         bucket=bucket,
+        destino=destino,
         cliente=cliente,
         planta=planta,
         ciudades=ids_ciudad,

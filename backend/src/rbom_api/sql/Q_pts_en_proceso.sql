@@ -52,6 +52,7 @@ WITH
             AND (@idCliente IS NULL OR d.idCliente = @idCliente)
         /*CIUDADES_FILTER*/
         /*CLASE_FILTER*/
+        /*PT_UNIVERSO_FILTER*/
     )
     ,cteBom AS
     (

@@ -10,7 +10,8 @@ export function Tabs() {
   const showSummary = useUiStore((s) => s.showSummary);
   const closeTab = useUiStore((s) => s.closeTab);
   const ventana = useUiStore((s) => s.ventana);
-  const { data: filas } = usePts(ventana);
+  const universo = useUiStore((s) => s.universo);
+  const { data: filas } = usePts(ventana, "", universo);
 
   const labelByIdPt = new Map<number, string>();
   if (filas) {

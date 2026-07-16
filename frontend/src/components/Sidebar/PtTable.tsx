@@ -39,18 +39,26 @@ function pickMetric(pt: PTEnProceso, m: DrilldownMetric): number {
 export function PtTable() {
   const ventana = useUiStore((s) => s.ventana);
   const filters = useUiStore((s) => s.filters);
+  const universo = useUiStore((s) => s.universo);
   const procesoFiltro = useUiStore((s) => s.procesoFiltro);
   const drilldownMetric = useUiStore((s) => s.drilldownMetric);
   const setDrilldownMetric = useUiStore((s) => s.setDrilldownMetric);
 
-  const { data: filas, isLoading, error } = usePts(ventana, filters.fechaMax);
+  const { data: filas, isLoading, error } = usePts(
+    ventana,
+    filters.fechaMax,
+    universo,
+  );
+  // El drill-down respeta la planta de la tarjeta clickeada (procesoFiltro),
+  // no un filtro global de planta (que ya no existe en el Resumen).
   const { data: ptsEnProceso, isLoading: loadingProceso } = usePtsEnProceso(
     procesoFiltro?.idProceso ?? null,
     filters.clienteId,
-    filters.plantaId,
+    procesoFiltro?.idPlanta ?? null,
     filters.ciudadIds,
     filters.tipoMaterialIds,
     filters.claseIds,
+    universo,
   );
 
   const selectedPtIds = useUiStore((s) => s.selectedPtIds);

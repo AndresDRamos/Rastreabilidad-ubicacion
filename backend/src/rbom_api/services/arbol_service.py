@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Iterable
 
 import pyodbc
 import structlog
@@ -20,11 +21,15 @@ def listar_pts(
     conn: pyodbc.Connection,
     ventana_meses: int,
     fecha_max: str | None = None,
+    universo_ids: Iterable[int] | None = None,
 ) -> list[FilaListado]:
     """Lee Q_listado y valida cada fila contra FilaListado."""
     t0 = time.perf_counter()
     filas = db.fetch_listado(
-        conn, ventana_meses=ventana_meses, fecha_max=fecha_max
+        conn,
+        ventana_meses=ventana_meses,
+        fecha_max=fecha_max,
+        universo_ids=universo_ids,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(

@@ -10,11 +10,11 @@ export interface LayoutOptions {
   nodeSep?: number;
 }
 
-export function layoutLR<T extends Record<string, unknown>>(
+function runDagre<T extends Record<string, unknown>>(
   nodes: Node<T>[],
   edges: Edge[],
-  opts: LayoutOptions = {},
-): Node<T>[] {
+  opts: LayoutOptions,
+): { g: dagre.graphlib.Graph; nodeWidth: number; nodeHeight: number } {
   const nodeWidth = opts.nodeWidth ?? 240;
   const nodeHeight = opts.nodeHeight ?? 110;
   const rankSep = opts.rankSep ?? 90;
@@ -32,7 +32,15 @@ export function layoutLR<T extends Record<string, unknown>>(
   }
 
   dagre.layout(g);
+  return { g, nodeWidth, nodeHeight };
+}
 
+function placeNodes<T extends Record<string, unknown>>(
+  nodes: Node<T>[],
+  g: dagre.graphlib.Graph,
+  nodeWidth: number,
+  nodeHeight: number,
+): Node<T>[] {
   return nodes.map((n) => {
     const pos = g.node(n.id);
     return {
@@ -40,4 +48,13 @@ export function layoutLR<T extends Record<string, unknown>>(
       position: { x: pos.x - nodeWidth / 2, y: pos.y - nodeHeight / 2 },
     };
   });
+}
+
+export function layoutLR<T extends Record<string, unknown>>(
+  nodes: Node<T>[],
+  edges: Edge[],
+  opts: LayoutOptions = {},
+): Node<T>[] {
+  const { g, nodeWidth, nodeHeight } = runDagre(nodes, edges, opts);
+  return placeNodes(nodes, g, nodeWidth, nodeHeight);
 }

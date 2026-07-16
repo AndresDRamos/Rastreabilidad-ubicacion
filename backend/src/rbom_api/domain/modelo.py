@@ -194,6 +194,9 @@ class BloqueProceso(_Base):
     """
     idProceso: Optional[int] = None
     Proceso: str
+    # El bloque se desglosa por planta: una fila por (proceso X, planta).
+    idPlanta: Optional[int] = None
+    NombrePlanta: Optional[str] = None
     # Buckets sobre estatus=LIBERADO (idEstatusEtiqueta=2)
     Disponibles: float       # sig=X, ubic <> X (esperando entrar, no llego)
     Recibidas: float         # sig=X, ubic = X (ya esta fisicamente en X)
@@ -204,7 +207,6 @@ class BloqueProceso(_Base):
     # Totales del bloque (DISTINCT sobre la union de las 5 categorias)
     Etiquetas: int
     Materiales: int          # COUNT DISTINCT idMaterial (antes 'Componentes')
-    Plantas: int
 
 
 class PTEnProceso(_Base):
@@ -230,6 +232,109 @@ class Planta(_Base):
     """Alimenta el selector de planta en la vista Resumen."""
     idPlanta: int
     NombrePlanta: str
+
+
+# ---------- Vista Flujo: grafo de procesos conectados ------------------------
+
+class FlujoBloque(_Base):
+    """Un bloque del grafo de Flujo = un proceso en una planta.
+
+    La estructura sale de la ruta de fabricacion (puede no tener WIP -> conteos
+    en 0). Los conteos son los que viven "dentro" del bloque (ver Q_flujo.sql).
+    `Disponibles` debe coincidir con la suma de las aristas entrantes.
+    """
+    idProceso: Optional[int] = None
+    Proceso: str
+    idPlanta: Optional[int] = None
+    NombrePlanta: Optional[str] = None
+    # Aparicion del proceso en la ruta (1a, 2a...). Un mismo proceso repetido en
+    # la ruta se dibuja como nodos distintos por fase, para leer el flujo de
+    # izquierda a derecha sin retornos. None en los nodos-puerta.
+    Fase: Optional[int] = 1
+    # Posicion representativa en la secuencia de fabricacion (mediana de
+    # OrdenFabricacion). El layout la usa para ordenar columnas izquierda
+    # (temprano) -> derecha (tardio). None = nodo sin ruta (solo WIP huerfano).
+    Rango: Optional[float] = None
+    Recibidas: float = 0.0
+    Disponibles: float = 0.0
+    Inspeccion: float = 0.0
+    Retrabajo: float = 0.0
+    Etiquetas: int = 0
+    Materiales: int = 0
+    # Nodo-PUERTA: representa una planta externa que surte/recibe material en el
+    # drill-in de una planta. idProceso/Fase son None; los conteos son 0 (el
+    # material en transito vive en la arista de puerta). Direccion 'in' = entra a
+    # la planta (borde izq); 'out' = sale (borde der).
+    EsPuerta: bool = False
+    idPlantaVecina: Optional[int] = None
+    NombrePlantaVecina: Optional[str] = None
+    Direccion: Optional[str] = None       # 'in' | 'out' | None
+
+
+class FlujoArista(_Base):
+    """Una arista del grafo = material que el proceso origen libero y va en
+    transito hacia el proceso destino (= PorTransferir de X hacia Y). La
+    estructura sale de la ruta; `Piezas`/`Etiquetas` = 0 si no hay material."""
+    idProcesoOrigen: Optional[int] = None
+    ProcesoOrigen: str
+    FaseOrigen: int = 1
+    idProcesoDestino: Optional[int] = None
+    ProcesoDestino: str
+    FaseDestino: int = 1
+    idPlanta: Optional[int] = None
+    Piezas: float = 0.0
+    Etiquetas: int = 0
+    # Arista de PUERTA (cruce interplanta). Uno de los extremos es un nodo-puerta
+    # (la planta vecina); el otro es un proceso real de la planta del drill.
+    # Direccion 'in' -> el origen es la puerta; 'out' -> el destino es la puerta.
+    # ProcesoFrontera = nombre del proceso que surte (in) o recibe (out) en la
+    # otra planta, para rotular la arista.
+    EsInterPlanta: bool = False
+    Direccion: Optional[str] = None       # 'in' | 'out' | None
+    idPlantaVecina: Optional[int] = None
+    NombrePlantaVecina: Optional[str] = None
+    ProcesoFrontera: Optional[str] = None
+
+
+class FlujoResponse(_Base):
+    bloques: list[FlujoBloque] = Field(default_factory=list)
+    aristas: list[FlujoArista] = Field(default_factory=list)
+
+
+# ---------- Vista Flujo, nivel PLANTA (overview) -----------------------------
+
+class FlujoPlantaNodo(_Base):
+    """Un bloque del overview = una planta con su WIP interno total (suma de
+    todos sus procesos). `Rango` (mediana de OrdenFabricacion de sus pasos)
+    ordena las plantas izquierda (fabricacion) -> derecha (embarque)."""
+    idPlanta: Optional[int] = None
+    NombrePlanta: Optional[str] = None
+    Rango: Optional[float] = None
+    Recibidas: float = 0.0
+    Disponibles: float = 0.0
+    Inspeccion: float = 0.0
+    Retrabajo: float = 0.0
+    Etiquetas: int = 0
+    Materiales: int = 0
+    Procesos: int = 0
+
+
+class FlujoPlantaArista(_Base):
+    """Una arista del overview = material liberado en la planta origen cuyo
+    siguiente proceso vive en la planta destino (PorTransferir interplanta). La
+    estructura sale de la ruta; `Piezas`/`Etiquetas` = 0 si no hay material."""
+    idPlantaOrigen: Optional[int] = None
+    PlantaOrigen: str
+    idPlantaDestino: Optional[int] = None
+    PlantaDestino: str
+    Piezas: float = 0.0        # material en transito A->B ahora (color/animacion)
+    Etiquetas: int = 0
+    Componentes: int = 0       # componentes que rutan A->B (grosor de la arista)
+
+
+class FlujoPlantasResponse(_Base):
+    nodos: list[FlujoPlantaNodo] = Field(default_factory=list)
+    aristas: list[FlujoPlantaArista] = Field(default_factory=list)
 
 
 class EtiquetaDetalle(_Base):

@@ -96,6 +96,9 @@ export type Mode = "inventario" | "requerimiento";
 export interface BloqueProceso {
   idProceso: number | null;
   Proceso: string;
+  // El bloque se desglosa por planta: una fila por (proceso X, planta).
+  idPlanta: number | null;
+  NombrePlanta: string | null;
   // Buckets sobre estatus=LIBERADO
   Disponibles: number;      // sig=X, ubic <> X
   Recibidas: number;        // sig=X, ubic = X
@@ -106,7 +109,6 @@ export interface BloqueProceso {
   // Totales del bloque
   Etiquetas: number;
   Materiales: number;       // antes 'Componentes' — ahora COUNT DISTINCT idMaterial
-  Plantas: number;
 }
 
 export interface PTEnProceso {
@@ -135,7 +137,10 @@ export type BloqueBucket =
   | "Recibidas"
   | "PorTransferir"
   | "Inspeccion"
-  | "Retrabajo";
+  | "Retrabajo"
+  // Arista de ruta en cero: material aun en el origen cuya ruta apunta al
+  // destino. Requiere ?destino=. Solo se usa desde el click de una arista vacia.
+  | "Encaminadas";
 
 export interface EtiquetaDetalle {
   idEtiqueta: number;
@@ -152,4 +157,99 @@ export interface EtiquetaDetalle {
   procesoUbicacion: number | null;
   UbicacionProceso: string | null;
   ubicacionNombre: string | null;
+}
+
+// ---------- Universo de filtrado (pestana del sidebar) ----------------------
+
+// "general" = todo el universo de demanda. "caterpillar" = solo los idMaterial
+// del CSV de numeros criticos (NumerosCriticos.csv, lado backend).
+export type Universo = "general" | "caterpillar";
+
+// Modo de la vista Resumen: tarjetas sueltas o grafo de flujo conectado.
+export type ResumenMode = "cards" | "flujo";
+
+// ---------- Vista Flujo: grafo de procesos conectados -----------------------
+
+export interface FlujoBloque {
+  idProceso: number | null;
+  Proceso: string;
+  idPlanta: number | null;
+  NombrePlanta: string | null;
+  // Aparición del proceso en la ruta (1ª, 2ª...). Un mismo proceso repetido se
+  // dibuja como nodos distintos por fase (flujo limpio izq→der). null = puerta.
+  Fase: number | null;
+  // Posición representativa en la secuencia de fabricación (mediana de
+  // OrdenFabricacion). El layout ordena columnas por este valor. null = nodo
+  // sin ruta (solo WIP huérfano).
+  Rango: number | null;
+  Recibidas: number;     // estatus=LIBERADO, sig=Y, ubic=Y
+  Disponibles: number;   // estatus=LIBERADO, sig=Y, ubic<>Y (= Σ aristas entrantes)
+  Inspeccion: number;    // estatus=POR INSPECCION, procActual=Y
+  Retrabajo: number;     // estatus=POR RETRABAJO, procActual=Y
+  Etiquetas: number;
+  Materiales: number;
+  // Nodo-PUERTA: planta externa que surte/recibe en el drill-in. idProceso/Fase
+  // = null, conteos = 0 (el material vive en la arista). 'in' entra (borde izq);
+  // 'out' sale (borde der).
+  EsPuerta: boolean;
+  idPlantaVecina: number | null;
+  NombrePlantaVecina: string | null;
+  Direccion: "in" | "out" | null;
+}
+
+export interface FlujoArista {
+  idProcesoOrigen: number | null;
+  ProcesoOrigen: string;
+  FaseOrigen: number;
+  idProcesoDestino: number | null;
+  ProcesoDestino: string;
+  FaseDestino: number;
+  idPlanta: number | null;
+  Piezas: number;        // = PorTransferir de origen hacia destino
+  Etiquetas: number;
+  // Arista de PUERTA (cruce interplanta). 'in' → el origen es la puerta; 'out' →
+  // el destino es la puerta. ProcesoFrontera = proceso que surte/recibe en la
+  // otra planta (rótulo).
+  EsInterPlanta: boolean;
+  Direccion: "in" | "out" | null;
+  idPlantaVecina: number | null;
+  NombrePlantaVecina: string | null;
+  ProcesoFrontera: string | null;
+}
+
+export interface FlujoResponse {
+  bloques: FlujoBloque[];
+  aristas: FlujoArista[];
+}
+
+// ---------- Vista Flujo, nivel PLANTA (overview) ----------------------------
+
+export interface FlujoPlantaNodo {
+  idPlanta: number | null;
+  NombrePlanta: string | null;
+  // Mediana de OrdenFabricacion de los pasos de la planta. Ordena izquierda
+  // (fabricación) → derecha (embarque). null = sin ruta.
+  Rango: number | null;
+  Recibidas: number;
+  Disponibles: number;
+  Inspeccion: number;
+  Retrabajo: number;
+  Etiquetas: number;
+  Materiales: number;
+  Procesos: number; // cuántos procesos distintos corre la planta
+}
+
+export interface FlujoPlantaArista {
+  idPlantaOrigen: number | null;
+  PlantaOrigen: string;
+  idPlantaDestino: number | null;
+  PlantaDestino: string;
+  Piezas: number;      // material en tránsito A→B ahora (color/animación)
+  Etiquetas: number;
+  Componentes: number; // componentes que rutan A→B (grosor de la arista)
+}
+
+export interface FlujoPlantasResponse {
+  nodos: FlujoPlantaNodo[];
+  aristas: FlujoPlantaArista[];
 }

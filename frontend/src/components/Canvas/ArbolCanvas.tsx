@@ -37,7 +37,6 @@ interface Props {
 function ArbolCanvasInner({ idPt }: Props) {
   const ventana = useUiStore((s) => s.ventana);
   const fechaMax = useUiStore((s) => s.filters.fechaMax);
-  const plantaId = useUiStore((s) => s.filters.plantaId);
   const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
   const expanded = useUiStore((s) => s.expanded);
   const toggleExpanded = useUiStore((s) => s.toggleExpanded);
@@ -52,10 +51,10 @@ function ArbolCanvasInner({ idPt }: Props) {
     if (!procesoFiltro) return null;
     return {
       idProceso: procesoFiltro.idProceso,
-      idPlanta: plantaId,
+      idPlanta: procesoFiltro.idPlanta,
       idsTipoMaterial: tipoMaterialIds,
     };
-  }, [procesoFiltro, plantaId, tipoMaterialIds]);
+  }, [procesoFiltro, tipoMaterialIds]);
 
   const expandableIds = useMemo<number[]>(() => {
     if (!data) return [];

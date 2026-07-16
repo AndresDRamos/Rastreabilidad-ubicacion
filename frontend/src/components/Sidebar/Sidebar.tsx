@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { FiltersHeader } from "./FiltersHeader";
 import { PtTable } from "./PtTable";
+import { UniversoTabs } from "./UniversoTabs";
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -45,6 +46,7 @@ export function Sidebar() {
             {"<"}
           </button>
         </header>
+        <UniversoTabs />
         <FiltersHeader />
         <PtTable />
       </div>

@@ -9,10 +9,13 @@
 -- Parametros:
 --   @idProcesoSelected int    Obligatorio.
 --   @bucket            varchar(20)  Uno de: 'Disponibles', 'Recibidas',
---                                  'PorTransferir', 'Inspeccion', 'Retrabajo'.
---                                  El backend valida el valor antes.
+--                                  'PorTransferir', 'Inspeccion', 'Retrabajo',
+--                                  'Encaminadas'. El backend valida el valor antes.
 --   @idCliente         int?   Default NULL.
 --   @idPlantaFiltro    int?   Default NULL.
+--   @idDestino         int?   Default NULL. Solo con bucket 'PorTransferir' (arista
+--                                  con material) o 'Encaminadas' (arista de ruta sin
+--                                  material aun): proceso destino Y de la arista X->Y.
 --
 -- Placeholders reemplazados desde Python (igual que Q_bloques):
 --   /*CIUDADES_FILTER*/   "AND d.idCiudad IN (...)" o "".
@@ -30,6 +33,7 @@ DECLARE @bucket            varchar(20)  = @bucket;
 DECLARE @idCliente         int          = @idCliente;
 DECLARE @idPlantaFiltro    int          = @idPlantaFiltro;
 DECLARE @conFiltroUniverso bit          = @conFiltroUniverso;
+DECLARE @idDestino         int          = @idDestino;
 
 WITH
     cteDem AS
@@ -42,6 +46,7 @@ WITH
             AND (@idCliente IS NULL OR d.idCliente = @idCliente)
         /*CIUDADES_FILTER*/
         /*CLASE_FILTER*/
+        /*PT_UNIVERSO_FILTER*/
     )
     ,cteCompUniv AS
     (
@@ -49,6 +54,22 @@ WITH
         FROM EPS.AppProc.tblBomExplosionado b
         JOIN cteDem d ON b.IdMaterial = d.idPT
         WHERE b.IdTipoMaterial IN (1, 3)
+    )
+    -- Ruta de fabricacion por material con su proceso siguiente (LEAD). Solo se
+    -- usa para el bucket 'Encaminadas': identifica el material que aun esta en X
+    -- (sig=X) y cuya ruta despues de X apunta al destino Y de la arista X->Y.
+    -- Mismo patron que Q_flujo.sql (#ruta).
+    ,cteRuta AS
+    (
+        SELECT
+             mrt.idMaterial
+            ,p.idProceso
+            ,LEAD(p.idProceso) OVER (
+                PARTITION BY mrt.idMaterial ORDER BY mrt.OrdenFabricacion
+             ) AS idProcesoSiguiente
+        FROM EPS.dbo.tblMaterialRutaTiempo mrt
+        JOIN EPS.dbo.tblRuta    rt ON mrt.idRuta = rt.idRuta
+        JOIN EPS.dbo.tblProceso p  ON rt.idProceso = p.idProceso
     )
     ,cteEtiq AS
     (
@@ -106,6 +127,7 @@ LEFT JOIN EPS.dbo.tblProceso ps ON ps.idProceso = e.idProcesoSiguiente
 LEFT JOIN EPS.dbo.tblProceso pu ON pu.idProceso = e.procesoUbicacion
 LEFT JOIN EPS.dbo.tblPlanta  pp ON pp.idPlanta  = e.idPlanta
 WHERE
+(
     -- Disponibles: estatus=2, sig=X, ubic <> X
     (
         @bucket = 'Disponibles'
@@ -145,4 +167,24 @@ WHERE
         AND e.idEstatusEtiqueta = 5
         AND e.procesoActual = @idProcesoSelected
     )
+    OR
+    -- Encaminadas: material que TODAVIA no sale de X (sig=X, estatus=2 =
+    -- Disponibles+Recibidas de X) pero cuya ruta despues de X apunta al destino
+    -- Y. Es "lo que deberia irse" por la arista X->Y aunque PorTransferir=0.
+    -- Solo aplica con @idDestino (arista del Flujo).
+    (
+        @bucket = 'Encaminadas'
+        AND @idDestino IS NOT NULL
+        AND e.idEstatusEtiqueta = 2
+        AND e.idProcesoSiguiente = @idProcesoSelected
+        AND EXISTS (
+            SELECT 1 FROM cteRuta r
+            WHERE r.idMaterial = e.idMaterial
+              AND r.idProceso = @idProcesoSelected
+              AND r.idProcesoSiguiente = @idDestino
+        )
+    )
+)
+-- Detalle de una arista del Flujo: acota el destino (solo con PorTransferir).
+/*DESTINO_FILTER*/
 ORDER BY e.cantidad DESC, e.idEtiqueta;

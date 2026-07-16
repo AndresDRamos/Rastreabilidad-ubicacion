@@ -76,6 +76,9 @@ Rastreabilidad-app/
 | Modificar layout / posiciones del árbol | `frontend/docs/data-flow.md` → `frontend/src/lib/{layout,layoutCache,buildGraph}.ts` |
 | Cambiar apariencia de un nodo | `frontend/docs/nodes-and-edges.md` → `frontend/src/components/Canvas/nodes/*.tsx` → `frontend/tailwind.config.ts` para colores |
 | Tocar la vista Resumen | `frontend/docs/architecture.md` (sección Vista Resumen) → `frontend/src/components/Summary/SummaryView.tsx` → `backend/src/rbom_api/routers/bloques.py` |
+| Tocar la vista Flujo (grafo de procesos) | `backend/src/rbom_api/sql/Q_flujo.sql` + `domain/db.py` (`fetch_flujo`) → `frontend/src/lib/buildFlujo.ts` → `frontend/src/components/Summary/{FlujoCanvas,FlujoProcessNode,FlujoEdge}.tsx` |
+| Tocar el universo Caterpillar (CSV) | `backend/src/rbom_api/domain/universos.py` + `config.py` (`numeros_criticos_path`) → `domain/db.py` (`_pt_universo_predicate`) → `frontend/src/components/Sidebar/UniversoTabs.tsx` + `store/useUiStore.ts` (`universo`) |
+| Componente de carga / skeleton | `frontend/src/components/ui/Skeleton.tsx` (`Skeleton` / `NumberSkeleton`) |
 | Agregar / cambiar un filtro del Resumen | `frontend/src/store/useUiStore.ts` (campo `filters`) → `frontend/src/components/Sidebar/*MultiSelect.tsx` → `frontend/src/api/queries.ts` (`useBloques` + `usePtsEnProceso`) → `backend/src/rbom_api/routers/bloques.py` + `Q_bloques.sql` + `Q_pts_en_proceso.sql` |
 | Drill-down Resumen → árbol | `frontend/docs/data-flow.md` (sección drill-down) → `frontend/src/components/Canvas/ArbolCanvas.tsx` (auto-expand + highlight) → `frontend/src/lib/buildGraph.ts` (`HighlightFiltro`) |
 | Tabs / cache de sesión | `frontend/docs/conventions.md` (sección staleTime + layoutCache) → `frontend/src/components/Tabs.tsx` → `frontend/src/lib/layoutCache.ts` |
@@ -116,6 +119,8 @@ cd backend
   - **Multi-cliente PT**: si un PT tiene demanda activa para varios (cliente × ciudad), el algoritmo consolida en una sola card del PT raíz con la suma de demandas.
   - **Parámetro `fecha_max`** opcional en `/api/pts` y `/api/pts/{id}/arbol` para acotar el techo de la ventana de demanda (past-due sigue incluido).
   - **Expansión de procesos** como nodos en el canvas (chip "procesos" con icono de árbol en la cabecera de cards expandibles).
+  - **Vista Flujo** (`GET /api/flujo` → `Q_flujo.sql`): grafo de procesos conectados (un bloque por `proceso × planta`, aristas `origen → destino`). La **estructura** sale de las rutas de fabricación (`tblMaterialRutaTiempo` + `LEAD`), incluye bloques/aristas **en cero**, y el WIP se **sobrepone** (LEFT JOIN). Toggle "Tarjetas ⇄ Flujo" en la cabecera del Resumen. `Disponibles(Y)` dentro del bloque = Σ aristas entrantes; la arista X→Y = `PorTransferir` de X hacia Y.
+  - **Universo "Caterpillar Priority"** (param `universo=caterpillar`): pestaña en el sidebar que acota listado + bloques + flujo a los `idMaterial` de `NumerosCriticos.csv` (raíz del repo). El backend lo lee con `domain/universos.py` (cache por mtime) e inyecta `/*PT_UNIVERSO_FILTER*/` en `cteDem` de cada query.
 - Validado visualmente contra BD real con el **PT canónico 91711066-RA** (CNH Industrial, Hood W Rear Engine, 222 piezas pendientes):
   - `90358715-RA` muestra `Doblez (4 de 218)` en modo Requerimiento y `0 en buffer` en modo Inventario.
   - `91711040-RA` muestra `Nivelado (0 de 213)` y `9 en buffer`.
@@ -127,17 +132,22 @@ cd backend
 3. **NO romper el contrato del netteo** — `pytest -m "not e2e"` (9 tests) debe quedar verde después de tus cambios. Los tests son el ground truth ejecutable del algoritmo.
 4. **NO cambiar `extra="ignore"` en los modelos pydantic** — el schema de EPS evoluciona; los modelos deben tolerar columnas extra.
 5. **NO mover el layout cache fuera de module-level** (`frontend/src/lib/layoutCache.ts`) — está ahí a propósito para sobrevivir el desmonte del canvas al cambiar de tab.
-6. **NO cambiar las queryKeys del frontend sin alinear el cache**:
+6. **NO cambiar las queryKeys del frontend sin alinear el cache** (el universo
+   `general | caterpillar` es la primera dimensión de los listados/Resumen/Flujo):
    - `["arbol", idPt, ventana, fechaMax]` — `staleTime: Infinity` (cache de sesión).
-   - `["pts", ventana, fechaMax]` — `staleTime: 5 min` (espeja TTL backend).
-   - `["bloques", cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
-   - `["pts-en-proceso", idProceso, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["pts", universo, ventana, fechaMax]` — `staleTime: 5 min` (espeja TTL backend).
+   - `["bloques", universo, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["flujo", universo, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["flujo-plantas", universo, cliente, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min` (overview nivel planta, sin filtro de planta).
+   - `["pts-en-proceso", universo, idProceso, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["etiquetas-detalle", universo, idProceso, bucket, destino, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
    - `["plantas"]` — `staleTime: 10 min`.
 7. **Si tocas `backend/src/rbom_api/domain/modelo.py`, replica en `frontend/src/api/types.ts`** — es el espejo TypeScript y no hay validación cruzada automática. Idea futura: generar con `openapi-typescript` desde `/openapi.json`.
 8. **Antes de borrar un PasoRuta virtual** lee `backend/docs/algoritmo-netteo.md` — el buffer virtual (`Almacen WIP`, idProceso=16) es parte del contrato y alimenta el valor de la card del componente.
 9. **Solo el bucket "Por procesar" alimenta el netteo**. `liberadas` y `en_inspeccion` son display puro. Si introduces una nueva métrica desde el WIP, decide explícitamente si descuenta demanda y refleja la decisión en `domain/netteo.py` + un test que la fije.
 10. **Si agregas un parámetro `DECLARE` nuevo a una `.sql`**, agrégalo al stripping de `_strip_param_declarations` en `backend/src/rbom_api/domain/db.py`, o SQL Server fallará con `variable already declared`.
 11. **Los placeholders `/*FILTRO*/` en las SQL del Resumen se reemplazan por string-substitution**: los `_*_predicate` de `db.py` validan cada id como `int(...)` antes de armar el `IN (...)`. Si agregas un placeholder nuevo, sigue ese patrón y NO concatenes strings del usuario directamente.
+12. **Los feedback de carga**: no dejar como primer estado un "0", ni un estado en blanco como inicial, sobretodo si es un número que aún está esperando los cálculos, utilizar un componente de carga.
 
 ## Convenciones de los documentos
 

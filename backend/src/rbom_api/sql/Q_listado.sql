@@ -37,6 +37,7 @@ WITH cteDem AS (
     WHERE d.bActivo = 1
       AND d.Fecha   <= @cutoff                         -- past-due incluido (sin piso)
       AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
+      /*PT_UNIVERSO_FILTER*/
     GROUP BY d.idMaterial, d.idCliente, d.idCiudad, I.CLASS_ID_ARTCULO_ID, C.LIST_ITEM_NAME
 )
 SELECT

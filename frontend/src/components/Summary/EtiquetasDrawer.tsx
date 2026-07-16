@@ -8,6 +8,7 @@ const BUCKET_LABEL: Record<string, string> = {
   PorTransferir: "Por transferir",
   Inspeccion: "Inspección",
   Retrabajo: "Retrabajo",
+  Encaminadas: "Encaminadas",
 };
 
 const BUCKET_COLOR: Record<string, string> = {
@@ -16,25 +17,34 @@ const BUCKET_COLOR: Record<string, string> = {
   PorTransferir: "text-status-pt",
   Inspeccion: "text-status-empty",
   Retrabajo: "text-status-partial",
+  Encaminadas: "text-status-covered",
+};
+
+// Mensaje de "sin resultados" especifico por bucket.
+const BUCKET_EMPTY: Record<string, string> = {
+  Encaminadas:
+    "Ninguna etiqueta en el proceso origen tiene su ruta apuntando a este destino.",
 };
 
 export function EtiquetasDrawer() {
   const bloqueDetalle = useUiStore((s) => s.bloqueDetalle);
   const setBloqueDetalle = useUiStore((s) => s.setBloqueDetalle);
   const clienteId = useUiStore((s) => s.filters.clienteId);
-  const plantaId = useUiStore((s) => s.filters.plantaId);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
   const claseIds = useUiStore((s) => s.filters.claseIds);
+  const universo = useUiStore((s) => s.universo);
 
   const { data, isLoading, isFetching, error } = useEtiquetasDetalle(
     bloqueDetalle?.idProceso ?? null,
     bloqueDetalle?.bucket ?? null,
     clienteId,
-    plantaId,
+    bloqueDetalle?.idPlanta ?? null,
     ciudadIds,
     tipoMaterialIds,
     claseIds,
+    universo,
+    bloqueDetalle?.destino ?? null,
   );
 
   const isOpen = bloqueDetalle !== null;
@@ -65,7 +75,9 @@ export function EtiquetasDrawer() {
                   Detalle de etiquetas
                 </div>
                 <h3 className="text-base font-semibold text-ink truncate">
-                  {bloqueDetalle.nombreProceso}
+                  {bloqueDetalle.tituloDestino
+                    ? `${bloqueDetalle.nombreProceso} → ${bloqueDetalle.tituloDestino}`
+                    : bloqueDetalle.nombreProceso}
                 </h3>
                 <div className="mt-1 flex items-center gap-2 text-xs">
                   <span
@@ -121,7 +133,8 @@ export function EtiquetasDrawer() {
                 </div>
               ) : !data || data.length === 0 ? (
                 <div className="p-5 text-sm text-ink-muted">
-                  Sin etiquetas que coincidan con este bucket.
+                  {BUCKET_EMPTY[bloqueDetalle.bucket] ??
+                    "Sin etiquetas que coincidan con este bucket."}
                 </div>
               ) : (
                 <table className="w-full text-xs">

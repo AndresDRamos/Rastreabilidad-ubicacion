@@ -1,7 +1,9 @@
 -- =============================================================================
 -- Q_bloques.sql  -  Vista Resumen: bloques por proceso con 5 categorias de WIP
 --
--- Una fila por "proceso X" con los siguientes conteos (mutuamente excluyentes
+-- Una fila por (proceso X, planta): el desglose por planta permite que la
+-- vista Resumen agrupe las tarjetas en secciones colapsables por planta. Los
+-- siguientes conteos son mutuamente excluyentes
 -- DENTRO de un mismo bloque; una misma etiqueta puede aparecer en dos bloques
 -- distintos -- como saliente en X y como entrante en Y):
 --
@@ -59,6 +61,7 @@ WITH
             AND (@idCliente IS NULL OR d.idCliente = @idCliente)
         /*CIUDADES_FILTER*/
         /*CLASE_FILTER*/
+        /*PT_UNIVERSO_FILTER*/
     )
     ,cteCompUniv AS
     (
@@ -172,9 +175,13 @@ WITH
         WHERE idEstatusEtiqueta = 5
           AND procesoActual IS NOT NULL
     )
+-- Una fila por (proceso X, planta): el bloque se desglosa por planta para que
+-- la vista Resumen agrupe las tarjetas en secciones colapsables por planta.
 SELECT
      u.idProceso                                                            AS idProceso
     ,ISNULL(p.Nombre, '(sin proceso)')                                       AS Proceso
+    ,u.idPlanta                                                              AS idPlanta
+    ,pl.Nombre                                                               AS NombrePlanta
     ,SUM(CASE WHEN u.bucket = 'Disponibles'   THEN u.cantidad ELSE 0 END)    AS Disponibles
     ,SUM(CASE WHEN u.bucket = 'Recibidas'     THEN u.cantidad ELSE 0 END)    AS Recibidas
     ,SUM(CASE WHEN u.bucket = 'PorTransferir' THEN u.cantidad ELSE 0 END)    AS PorTransferir
@@ -182,12 +189,14 @@ SELECT
     ,SUM(CASE WHEN u.bucket = 'Retrabajo'     THEN u.cantidad ELSE 0 END)    AS Retrabajo
     ,COUNT(DISTINCT u.idEtiqueta)                                            AS Etiquetas
     ,COUNT(DISTINCT u.idMaterial)                                            AS Materiales
-    ,COUNT(DISTINCT u.idPlanta)                                              AS Plantas
 FROM cteUnpivot u
 LEFT JOIN EPS.dbo.tblProceso p ON u.idProceso = p.idProceso
-GROUP BY u.idProceso, p.Nombre
-ORDER BY (
-    SUM(CASE WHEN u.bucket = 'Disponibles'   THEN u.cantidad ELSE 0 END)
-  + SUM(CASE WHEN u.bucket = 'Recibidas'     THEN u.cantidad ELSE 0 END)
-  + SUM(CASE WHEN u.bucket = 'PorTransferir' THEN u.cantidad ELSE 0 END)
-) DESC;
+LEFT JOIN EPS.dbo.tblPlanta  pl ON u.idPlanta = pl.idPlanta
+GROUP BY u.idProceso, p.Nombre, u.idPlanta, pl.Nombre
+ORDER BY
+    pl.Nombre,
+    (
+        SUM(CASE WHEN u.bucket = 'Disponibles'   THEN u.cantidad ELSE 0 END)
+      + SUM(CASE WHEN u.bucket = 'Recibidas'     THEN u.cantidad ELSE 0 END)
+      + SUM(CASE WHEN u.bucket = 'PorTransferir' THEN u.cantidad ELSE 0 END)
+    ) DESC;
