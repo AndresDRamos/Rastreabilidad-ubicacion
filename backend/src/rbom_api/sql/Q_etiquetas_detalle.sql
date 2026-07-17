@@ -11,13 +11,13 @@
 --   @bucket            varchar(20)  Uno de: 'Disponibles', 'Recibidas',
 --                                  'PorTransferir', 'Inspeccion', 'Retrabajo',
 --                                  'Encaminadas'. El backend valida el valor antes.
---   @idCliente         int?   Default NULL.
 --   @idPlantaFiltro    int?   Default NULL.
 --   @idDestino         int?   Default NULL. Solo con bucket 'PorTransferir' (arista
 --                                  con material) o 'Encaminadas' (arista de ruta sin
 --                                  material aun): proceso destino Y de la arista X->Y.
 --
 -- Placeholders reemplazados desde Python (igual que Q_bloques):
+--   /*CLIENTES_FILTER*/   "AND d.idCliente IN (...)" o "".
 --   /*CIUDADES_FILTER*/   "AND d.idCiudad IN (...)" o "".
 --   /*TIPOMAT_FILTER*/    "AND m.idTipoMaterial IN (...)" o "".
 --   /*CLASE_FILTER*/      "AND I.CLASS_ID_ARTCULO_ID IN (...)" o "".
@@ -30,7 +30,6 @@
 
 DECLARE @idProcesoSelected int          = @idProcesoSelected;
 DECLARE @bucket            varchar(20)  = @bucket;
-DECLARE @idCliente         int          = @idCliente;
 DECLARE @idPlantaFiltro    int          = @idPlantaFiltro;
 DECLARE @conFiltroUniverso bit          = @conFiltroUniverso;
 DECLARE @idDestino         int          = @idDestino;
@@ -43,7 +42,7 @@ WITH
         LEFT JOIN NETSUITE.dbo.ITEMS I ON I.ITEM_ID = d.ItemID
         WHERE d.bActivo = 1
             AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
-            AND (@idCliente IS NULL OR d.idCliente = @idCliente)
+        /*CLIENTES_FILTER*/
         /*CIUDADES_FILTER*/
         /*CLASE_FILTER*/
         /*PT_UNIVERSO_FILTER*/

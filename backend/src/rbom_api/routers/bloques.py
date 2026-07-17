@@ -1,7 +1,7 @@
 """Endpoints de la vista Resumen.
 
-- GET /api/bloques?cliente=&planta=                  -> list[BloqueProceso]
-- GET /api/bloques/{idProceso}/pts?cliente=&planta=  -> list[PTEnProceso]
+- GET /api/bloques?clientes=&planta=                  -> list[BloqueProceso]
+- GET /api/bloques/{idProceso}/pts?clientes=&planta=  -> list[PTEnProceso]
 - GET /api/plantas                                   -> list[Planta]
 
 Cache TTL=2 min: los numeros se mueven con cada movimiento de etiqueta,
@@ -56,10 +56,10 @@ def _universo_ids(universo: str) -> frozenset[int] | None:
 # Cache compartido entre requests. Keys incluyen filtros (y el universo) para no
 # devolver datos cruzados entre clientes/plantas/ciudades/tipos/universos.
 _CacheKeyBloques = tuple[
-    str, int | None, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
+    str, tuple[int, ...], int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
 ]
 _CacheKeyPts = tuple[
-    str, int, int | None, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
+    str, int, tuple[int, ...], int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
 ]
 _CacheKeyFlujo = _CacheKeyBloques
 
@@ -74,7 +74,7 @@ _cache_flujo: TTLCache[_CacheKeyFlujo, FlujoResponse] = TTLCache(
 )
 # Overview por planta: misma clave que el flujo pero SIN planta (siempre todas).
 _CacheKeyFlujoPlantas = tuple[
-    str, int | None, tuple[int, ...], tuple[int, ...], tuple[int, ...]
+    str, tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]
 ]
 _cache_flujo_plantas: TTLCache[_CacheKeyFlujoPlantas, FlujoPlantasResponse] = TTLCache(
     maxsize=64, ttl=120
@@ -105,7 +105,7 @@ _parse_ciudades_csv = _parse_int_csv
 
 @router.get("/bloques", response_model=list[BloqueProceso])
 def get_bloques(
-    cliente: Annotated[int | None, Query(ge=1)] = None,
+    clientes: Annotated[str | None, Query(description="CSV de idCliente")] = None,
     planta: Annotated[int | None, Query(ge=1)] = None,
     ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
     tipos_material: Annotated[
@@ -119,6 +119,7 @@ def get_bloques(
     universo: Annotated[Universo, Query()] = "general",
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[BloqueProceso]:
+    ids_cliente = _parse_int_csv(clientes)
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
@@ -127,7 +128,7 @@ def get_bloques(
         return []  # Caterpillar sin numeros criticos cargados
     key: _CacheKeyBloques = (
         universo,
-        cliente,
+        tuple(sorted(ids_cliente)),
         planta,
         tuple(sorted(ids_ciudad)),
         tuple(sorted(ids_tipo)),
@@ -141,7 +142,7 @@ def get_bloques(
     t0 = time.perf_counter()
     rows = db.fetch_bloques(
         conn,
-        id_cliente=cliente,
+        ids_cliente=ids_cliente or None,
         id_planta=planta,
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
@@ -153,7 +154,7 @@ def get_bloques(
         "db_query",
         query="Q_bloques",
         universo=universo,
-        cliente=cliente,
+        clientes=ids_cliente,
         planta=planta,
         ciudades=ids_ciudad,
         tipos_material=ids_tipo,
@@ -169,7 +170,7 @@ def get_bloques(
 
 @router.get("/flujo", response_model=FlujoResponse)
 def get_flujo(
-    cliente: Annotated[int | None, Query(ge=1)] = None,
+    clientes: Annotated[str | None, Query(description="CSV de idCliente")] = None,
     planta: Annotated[int | None, Query(ge=1)] = None,
     ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
     tipos_material: Annotated[
@@ -185,6 +186,7 @@ def get_flujo(
 ) -> FlujoResponse:
     """Grafo de procesos conectados: bloques (proceso x planta) + aristas
     (origen -> destino). Estructura desde la ruta, WIP sobrepuesto."""
+    ids_cliente = _parse_int_csv(clientes)
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
@@ -193,7 +195,7 @@ def get_flujo(
         return FlujoResponse(bloques=[], aristas=[])
     key: _CacheKeyFlujo = (
         universo,
-        cliente,
+        tuple(sorted(ids_cliente)),
         planta,
         tuple(sorted(ids_ciudad)),
         tuple(sorted(ids_tipo)),
@@ -207,7 +209,7 @@ def get_flujo(
     t0 = time.perf_counter()
     bloques_rows, aristas_rows = db.fetch_flujo(
         conn,
-        id_cliente=cliente,
+        ids_cliente=ids_cliente or None,
         id_planta=planta,
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
@@ -219,7 +221,7 @@ def get_flujo(
         "db_query",
         query="Q_flujo",
         universo=universo,
-        cliente=cliente,
+        clientes=ids_cliente,
         planta=planta,
         ciudades=ids_ciudad,
         tipos_material=ids_tipo,
@@ -239,7 +241,7 @@ def get_flujo(
 
 @router.get("/flujo/plantas", response_model=FlujoPlantasResponse)
 def get_flujo_plantas(
-    cliente: Annotated[int | None, Query(ge=1)] = None,
+    clientes: Annotated[str | None, Query(description="CSV de idCliente")] = None,
     ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
     tipos_material: Annotated[
         str | None,
@@ -254,6 +256,7 @@ def get_flujo_plantas(
 ) -> FlujoPlantasResponse:
     """Overview nivel planta: un nodo por planta + aristas interplanta. No
     acepta `planta` (muestra todas); el drill-in a una planta usa GET /flujo."""
+    ids_cliente = _parse_int_csv(clientes)
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
@@ -262,7 +265,7 @@ def get_flujo_plantas(
         return FlujoPlantasResponse(nodos=[], aristas=[])
     key: _CacheKeyFlujoPlantas = (
         universo,
-        cliente,
+        tuple(sorted(ids_cliente)),
         tuple(sorted(ids_ciudad)),
         tuple(sorted(ids_tipo)),
         tuple(sorted(ids_clase)),
@@ -275,7 +278,7 @@ def get_flujo_plantas(
     t0 = time.perf_counter()
     nodos_rows, aristas_rows = db.fetch_flujo_plantas(
         conn,
-        id_cliente=cliente,
+        ids_cliente=ids_cliente or None,
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
         ids_clase=ids_clase or None,
@@ -286,7 +289,7 @@ def get_flujo_plantas(
         "db_query",
         query="Q_flujo_plantas",
         universo=universo,
-        cliente=cliente,
+        clientes=ids_cliente,
         ciudades=ids_ciudad,
         tipos_material=ids_tipo,
         clases=ids_clase,
@@ -306,7 +309,7 @@ def get_flujo_plantas(
 @router.get("/bloques/{idProceso}/pts", response_model=list[PTEnProceso])
 def get_pts_en_proceso(
     idProceso: int,
-    cliente: Annotated[int | None, Query(ge=1)] = None,
+    clientes: Annotated[str | None, Query(description="CSV de idCliente")] = None,
     planta: Annotated[int | None, Query(ge=1)] = None,
     ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
     tipos_material: Annotated[
@@ -320,6 +323,7 @@ def get_pts_en_proceso(
     universo: Annotated[Universo, Query()] = "general",
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[PTEnProceso]:
+    ids_cliente = _parse_int_csv(clientes)
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
@@ -329,7 +333,7 @@ def get_pts_en_proceso(
     key: _CacheKeyPts = (
         universo,
         idProceso,
-        cliente,
+        tuple(sorted(ids_cliente)),
         planta,
         tuple(sorted(ids_ciudad)),
         tuple(sorted(ids_tipo)),
@@ -344,7 +348,7 @@ def get_pts_en_proceso(
     rows = db.fetch_pts_en_proceso(
         conn,
         id_proceso=idProceso,
-        id_cliente=cliente,
+        ids_cliente=ids_cliente or None,
         id_planta=planta,
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
@@ -357,7 +361,7 @@ def get_pts_en_proceso(
         query="Q_pts_en_proceso",
         universo=universo,
         id_proceso=idProceso,
-        cliente=cliente,
+        clientes=ids_cliente,
         planta=planta,
         ciudades=ids_ciudad,
         tipos_material=ids_tipo,
@@ -388,7 +392,7 @@ _BUCKETS_CON_DESTINO = {"PorTransferir", "Encaminadas"}
 # Cache (idProceso, bucket, filtros) — los detalles cambian igual de seguido
 # que los bloques; TTL 2 min coincide con el resto de la vista Resumen.
 _CacheKeyEtiq = tuple[
-    str, int, str, int | None, int | None, int | None,
+    str, int, str, tuple[int, ...], int | None, int | None,
     tuple[int, ...], tuple[int, ...], tuple[int, ...],
 ]
 _cache_etiquetas: TTLCache[_CacheKeyEtiq, list[EtiquetaDetalle]] = TTLCache(
@@ -406,7 +410,7 @@ def get_etiquetas_detalle(
         str,
         Query(description="Disponibles | Recibidas | PorTransferir | Inspeccion | Retrabajo"),
     ],
-    cliente: Annotated[int | None, Query(ge=1)] = None,
+    clientes: Annotated[str | None, Query(description="CSV de idCliente")] = None,
     planta: Annotated[int | None, Query(ge=1)] = None,
     ciudades: Annotated[str | None, Query(description="CSV de idCiudad")] = None,
     tipos_material: Annotated[
@@ -430,6 +434,7 @@ def get_etiquetas_detalle(
             detail=f"bucket invalido. Debe ser uno de {sorted(_BUCKET_WHITELIST)}",
         )
 
+    ids_cliente = _parse_int_csv(clientes)
     ids_ciudad = _parse_int_csv(ciudades)
     ids_tipo = _parse_int_csv(tipos_material)
     ids_clase = _parse_int_csv(clases)
@@ -440,7 +445,7 @@ def get_etiquetas_detalle(
         universo,
         idProceso,
         bucket,
-        cliente,
+        tuple(sorted(ids_cliente)),
         planta,
         destino,
         tuple(sorted(ids_ciudad)),
@@ -457,7 +462,7 @@ def get_etiquetas_detalle(
         conn,
         id_proceso=idProceso,
         bucket=bucket,
-        id_cliente=cliente,
+        ids_cliente=ids_cliente or None,
         id_planta=planta,
         ids_ciudad=ids_ciudad or None,
         ids_tipo_material=ids_tipo or None,
@@ -473,7 +478,7 @@ def get_etiquetas_detalle(
         id_proceso=idProceso,
         bucket=bucket,
         destino=destino,
-        cliente=cliente,
+        clientes=ids_cliente,
         planta=planta,
         ciudades=ids_ciudad,
         tipos_material=ids_tipo,

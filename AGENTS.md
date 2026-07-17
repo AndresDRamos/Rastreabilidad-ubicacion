@@ -35,10 +35,11 @@ Rastreabilidad-app/
 │   │   ├── config.py          ← Settings (pydantic-settings) + SQL_DIR
 │   │   ├── deps.py            ← Depends(get_conn): pyodbc fresh por request
 │   │   ├── logging_setup.py   ← structlog + CorrelationIdMiddleware
-│   │   ├── routers/           ← health, pts, arbol, bloques
+│   │   ├── routers/           ← health, pts, arbol, bloques, requerimiento, export
 │   │   ├── services/          ← arbol_service (orquestación)
 │   │   ├── domain/            ← modelo (pydantic), netteo (algoritmo), db (pyodbc)
-│   │   ├── sql/               ← Q_listado, Q_detalle, Q_bloques, Q_pts_en_proceso, Q_plantas
+│   │   ├── sql/               ← Q_listado, Q_detalle, Q_bloques, Q_pts_en_proceso, Q_plantas,
+│   │   │                        Q_requerimiento_calendario, Q_orden_detalle
 │   │   └── static/            ← bundle del frontend (gitignored)
 │   ├── tests/unit/            ← 9 tests sintéticos del netteo
 │   ├── tests/e2e/             ← 4 tests contra BD real (marker `e2e`)
@@ -53,7 +54,7 @@ Rastreabilidad-app/
 │   │   ├── store/useUiStore.ts ← zustand: view, filtros, selectedPtIds, activeTabId, mode, expanded, procesoFiltro
 │   │   ├── components/
 │   │   │   ├── Canvas/        ← ArbolCanvas + 3 nodos custom (PtNode/ComponentNode/ProcessNode) + PartThumbnail + EmptyState
-│   │   │   ├── Sidebar/       ← Sidebar + FiltersHeader + PtTable + ClienteCombobox + CiudadMultiSelect + ClaseMultiSelect
+│   │   │   ├── Sidebar/       ← Sidebar + FiltersHeader + PtTable + ClienteCombobox + CiudadMultiSelect + ClaseMultiSelect + CalendarioPanel
 │   │   │   ├── Summary/       ← SummaryView (vista Resumen) + TipoMaterialSelect
 │   │   │   ├── Tabs.tsx       ← tab "Resumen" fija + un tab por PT abierto
 │   │   │   └── ModeToggle.tsx
@@ -79,6 +80,7 @@ Rastreabilidad-app/
 | Cambiar apariencia de un nodo | `frontend/docs/nodes-and-edges.md` → `frontend/src/components/Canvas/nodes/*.tsx` → `frontend/tailwind.config.ts` para colores |
 | Tocar la vista Resumen | `frontend/docs/architecture.md` (sección Vista Resumen) → `frontend/src/components/Summary/SummaryView.tsx` → `backend/src/rbom_api/routers/bloques.py` |
 | Tocar la vista Flujo (grafo de procesos) | `backend/src/rbom_api/sql/Q_flujo.sql` + `domain/db.py` (`fetch_flujo`) → `frontend/src/lib/buildFlujo.ts` → `frontend/src/components/Summary/{FlujoCanvas,FlujoProcessNode,FlujoEdge}.tsx` |
+| Tocar la vista Calendario de requerimiento (panel expandible del sidebar) | `backend/src/rbom_api/sql/Q_requerimiento_calendario.sql` + `Q_orden_detalle.sql` → `backend/src/rbom_api/domain/db.py` (`fetch_requerimiento_calendario`, `fetch_orden_detalle`) → `routers/requerimiento.py` → `frontend/src/api/queries.ts` (`useRequerimientoCalendario`, `useOrdenDetalle`) → `frontend/src/components/Sidebar/CalendarioPanel.tsx` → `frontend/src/store/useUiStore.ts` (campos `sidebarExpanded`, `calGranularidad`, `calIncluyeForecast`, `calModo`, `celdaDetalle`). La celda es demanda BRUTA por fecha — NO nettea WIP (eso sigue viviendo en el árbol). |
 | Tocar el universo Caterpillar (CSV) | `backend/src/rbom_api/domain/universos.py` + `config.py` (`numeros_criticos_path`) → `domain/db.py` (`_pt_universo_predicate`) → `frontend/src/components/Sidebar/UniversoTabs.tsx` + `store/useUiStore.ts` (`universo`) |
 | Componente de carga / skeleton | `frontend/src/components/ui/Skeleton.tsx` (`Skeleton` / `NumberSkeleton`) |
 | Agregar / cambiar un filtro del Resumen | `frontend/src/store/useUiStore.ts` (campo `filters`) → `frontend/src/components/Sidebar/*MultiSelect.tsx` → `frontend/src/api/queries.ts` (`useBloques` + `usePtsEnProceso`) → `backend/src/rbom_api/routers/bloques.py` + `Q_bloques.sql` + `Q_pts_en_proceso.sql` |
@@ -123,6 +125,7 @@ cd backend
   - **Expansión de procesos** como nodos en el canvas (chip "procesos" con icono de árbol en la cabecera de cards expandibles).
   - **Vista Flujo** (`GET /api/flujo` → `Q_flujo.sql`): grafo de procesos conectados (un bloque por `proceso × planta`, aristas `origen → destino`). La **estructura** sale de las rutas de fabricación (`tblMaterialRutaTiempo` + `LEAD`), incluye bloques/aristas **en cero**, y el WIP se **sobrepone** (LEFT JOIN). Toggle "Tarjetas ⇄ Flujo" en la cabecera del Resumen. `Disponibles(Y)` dentro del bloque = Σ aristas entrantes; la arista X→Y = `PorTransferir` de X hacia Y.
   - **Universo "Caterpillar Priority"** (param `universo=caterpillar`): pestaña en el sidebar que acota listado + bloques + flujo a los `idMaterial` de `NumerosCriticos.csv` (raíz del repo). El backend lo lee con `domain/universos.py` (cache por mtime) e inyecta `/*PT_UNIVERSO_FILTER*/` en `cteDem` de cada query.
+  - **Vista Calendario de requerimiento** (corte 1; panel expandible del sidebar, `frontend/src/components/Sidebar/CalendarioPanel.tsx`): matriz PT × tiempo con la demanda **BRUTA** (sin nettear WIP — el neteo sigue viviendo solo en el árbol) desagregada por día vía `GET /api/requerimiento/calendario` (`Q_requerimiento_calendario.sql`). Columna Past-due fija + buckets día/semana/mes (toggle) con heatmap cercano-cálido → lejano-frío, forecast hachurado, fila Total. Clic en celda abre un popover inferior con el detalle de línea de orden vía `GET /api/requerimiento/orden-detalle` (`Q_orden_detalle.sql`: OrdenVenta, POHeader/POLine, Fecha, PiezasPend, Precio_Unitario). Grano de fila = (PT × Cliente × Ciudad), igual que `Q_listado.sql` — un mismo PT puede repetirse. Toggle lista ⇄ calendario es un tercer estado de ancho del sidebar (`useUiStore.sidebarExpanded`). Fase 2 (planeada, NO implementada): historial de embarques por número de parte; por eso `CalModo` (`"requerimiento" | "embarques" | "ambos"`) y el eje de tiempo quedan extensibles hacia la izquierda de Past-due.
 - Validado visualmente contra BD real con el **PT canónico 91711066-RA** (CNH Industrial, Hood W Rear Engine, 222 piezas pendientes):
   - `90358715-RA` muestra `Doblez (4 de 218)` en modo Requerimiento y `4 en piso` en modo Inventario.
   - `91711040-RA` muestra `Nivelado (0 de 213)` y `9 en piso`.
@@ -138,12 +141,14 @@ cd backend
    `general | caterpillar` es la primera dimensión de los listados/Resumen/Flujo):
    - `["arbol", idPt, ventana, fechaMax]` — `staleTime: Infinity` (cache de sesión).
    - `["pts", universo, ventana, fechaMax]` — `staleTime: 5 min` (espeja TTL backend).
-   - `["bloques", universo, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
-   - `["flujo", universo, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
-   - `["flujo-plantas", universo, cliente, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min` (overview nivel planta, sin filtro de planta).
-   - `["pts-en-proceso", universo, idProceso, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
-   - `["etiquetas-detalle", universo, idProceso, bucket, destino, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["bloques", universo, clientesKey, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["flujo", universo, clientesKey, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["flujo-plantas", universo, clientesKey, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min` (overview nivel planta, sin filtro de planta).
+   - `["pts-en-proceso", universo, idProceso, clientesKey, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
+   - `["etiquetas-detalle", universo, idProceso, bucket, destino, clientesKey, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
    - `["plantas"]` — `staleTime: 10 min`.
+   - `["requerimiento-cal", universo, ventana, fechaMax]` — `staleTime: 5 min` (espeja TTL backend, igual que `pts`). Alimenta el panel Calendario; cliente/ciudad/forecast/granularidad se resuelven client-side sobre el mismo result-set, sin re-fetch.
+   - `["orden-detalle", idMaterial, cliente, ciudad, desde, hasta, forecast]` — `staleTime: 2 min` (popover de detalle de una celda del Calendario).
 7. **Si tocas `backend/src/rbom_api/domain/modelo.py`, replica en `frontend/src/api/types.ts`** — es el espejo TypeScript y no hay validación cruzada automática. Idea futura: generar con `openapi-typescript` desde `/openapi.json`.
 8. **Antes de borrar un PasoRuta virtual** lee `backend/docs/algoritmo-netteo.md` — el buffer virtual (`Almacen WIP`, idProceso=16) es parte del contrato del netteo: su `wip_en_paso` entra en `wip_total` y en el acumulado downstream de `req_paso`. Ya no alimenta la card directamente (desde 2026-07 muestra `wip_total` / `req_neto`), pero borrarlo **cambiaría los números**, no solo la UI.
 9. **Solo el bucket "Por procesar" alimenta el netteo**. `liberadas` y `en_inspeccion` son display puro. Si introduces una nueva métrica desde el WIP, decide explícitamente si descuenta demanda y refleja la decisión en `domain/netteo.py` + un test que la fije.

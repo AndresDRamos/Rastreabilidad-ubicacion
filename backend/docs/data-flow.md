@@ -14,6 +14,8 @@
 | `GET /api/bloques/{idProceso}/pts?…&universo=` | `db.fetch_pts_en_proceso` directo | `Q_pts_en_proceso.sql` | TTL 120s, maxsize 256 | TanStack staleTime 2 min |
 | `GET /api/bloques/{idProceso}/etiquetas?…&universo=&destino=` | `db.fetch_etiquetas_detalle` directo | `Q_etiquetas_detalle.sql` | TTL 120s, maxsize 512 | TanStack staleTime 2 min |
 | `GET /api/plantas` | `db.fetch_plantas` directo | `Q_plantas.sql` | TTL 600s, maxsize 1 | TanStack staleTime 10 min |
+| `GET /api/requerimiento/calendario?ventana=&fecha_max=&universo=` | `db.fetch_requerimiento_calendario` directo | `Q_requerimiento_calendario.sql` | TTL 300s, maxsize 32, key=(universo, ventana, fecha_max) | TanStack staleTime 5 min |
+| `GET /api/requerimiento/orden-detalle?idMaterial=&cliente=&ciudad=&desde=&hasta=&forecast=` | `db.fetch_orden_detalle` directo | `Q_orden_detalle.sql` | TTL 120s, maxsize 256 | TanStack staleTime 2 min |
 
 Nota: los endpoints del Resumen llaman directo a `db.*` sin pasar por `services/` porque no hay netteo ni transformación de dominio que justifique una capa extra. Si en el futuro agregas lógica de negocio sobre `BloqueProceso`, crea `services/bloques_service.py` y mueve la llamada ahí — el patrón está pensado para crecer en esa dirección.
 
@@ -151,6 +153,7 @@ Si no quitara los `DECLARE` originales del SQL, SQL Server tiraría `"The variab
 
 - `declare @ventana_meses`
 - `declare @idpt`
+- `declare @idmaterial`
 - `declare @fecha_max`
 - `declare @idplantafiltro`
 - `declare @idprocesoselected`

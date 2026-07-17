@@ -30,14 +30,14 @@ const NODE_TYPES = { flujoPlanta: FlujoPlantaNode };
 const EDGE_TYPES = { flujoEdge: FlujoEdge };
 
 function FlujoPlantasCanvasInner() {
-  const clienteId = useUiStore((s) => s.filters.clienteId);
+  const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
   const claseIds = useUiStore((s) => s.filters.claseIds);
   const universo = useUiStore((s) => s.universo);
 
   const { data, isLoading, isFetching, error } = useFlujoPlantas(
-    clienteId,
+    clienteIds,
     ciudadIds,
     tipoMaterialIds,
     claseIds,

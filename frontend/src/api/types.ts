@@ -21,6 +21,43 @@ export interface FilaListado {
   LineasForecast: number;
 }
 
+// ---------- Vista Calendario de requerimiento (panel expandible) ------------
+
+// Una fila del result-set de /api/requerimiento/calendario: demanda activa
+// desagregada por (PT x Cliente x Ciudad x Fecha[dia] x bForecast). El frontend
+// agrupa por (idMaterial, idCliente, idCiudad) y bucketiza Fecha. PiezasPend ya
+// descuenta lo embarcado.
+export interface CeldaCalendario {
+  idMaterial: number;
+  PT: string;
+  Descripcion: string;
+  idCliente: number | null;
+  Cliente: string;
+  idCiudad: number | null;
+  Ciudad: string;
+  Fecha: string; // ISO date (dia)
+  bForecast: boolean;
+  PiezasPend: number;
+}
+
+// Una linea de demanda que compone una celda (popover de detalle).
+export interface OrdenLinea {
+  OrdenVenta: string | null;
+  POHeader: string | null;
+  POLine: string | null;
+  Fecha: string; // ISO date
+  bForecast: boolean;
+  PiezasPend: number;
+  PrecioUnitario: number | null;
+}
+
+// Granularidad del eje de tiempo del calendario.
+export type CalGranularidad = "dia" | "semana" | "mes";
+
+// Modo del panel calendario. Corte 1 solo implementa "requerimiento"; "embarques"
+// / "ambos" quedan reservados para la fase 2 (historial de embarques).
+export type CalModo = "requerimiento" | "embarques" | "ambos";
+
 export interface DemandaPT {
   idMaterial: number;
   PT: string;

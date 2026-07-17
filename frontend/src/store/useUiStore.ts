@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import type {
   BloqueBucket,
+  CalGranularidad,
+  CalModo,
   DrilldownMetric,
   Mode,
   ResumenMode,
@@ -9,9 +11,9 @@ import type {
 } from "@/api/types";
 
 export interface UiFilters {
-  clienteId: number | null;    // null = sin filtro (todos los clientes)
+  clienteIds: number[];        // [] = todos los clientes. Multi-select.
   ciudadIds: number[];         // [] = todas las ciudades. Multi-select.
-  pt: string;                  // busqueda parcial client-side
+  ptIds: number[];             // [] = todos los numeros de parte. Multi-select (idMaterial).
   fechaMax: string;            // ISO yyyy-mm-dd; "" = sin filtro
   plantaId: number | null;     // null = todas las plantas
   tipoMaterialIds: number[];   // [] = sin filtro (PT + Intermedio). PT=1, Intermedio=3.
@@ -40,6 +42,25 @@ export interface BloqueDetalleOpen {
   destino?: number | null;
   // Etiqueta opcional para el header del drawer (ej. "Corte → Doblez").
   tituloDestino?: string | null;
+}
+
+/**
+ * Celda del calendario de requerimiento seleccionada (popover de detalle de
+ * orden de venta). null = ninguna abierta.
+ */
+export interface CeldaDetalleOpen {
+  idMaterial: number;
+  PT: string;
+  idCliente: number | null;
+  Cliente: string;
+  idCiudad: number | null;
+  Ciudad: string;
+  // Limites del bucket (ISO yyyy-mm-dd). `desde` inclusivo, `hasta` EXCLUSIVO.
+  // desde=null => columna past-due (todo lo anterior a `hasta` = hoy).
+  desde: string | null;
+  hasta: string | null;
+  // Rotulo del header del popover (ej. "Sem del 28 jul" o "Past-due").
+  etiqueta: string;
 }
 
 /**
@@ -87,6 +108,18 @@ interface UiStore {
   // todas expandidas (set vacio). Guarda idPlanta de las plantas colapsadas.
   plantasColapsadas: Set<number>;
 
+  // ---- Vista Calendario de requerimiento (panel expandible del sidebar) ----
+  // Tercer estado de ancho del sidebar: false = lista normal (badges), true =
+  // matriz calendario. Colapsar la lista (boton "<") es un estado visual aparte.
+  sidebarExpanded: boolean;
+  calGranularidad: CalGranularidad;  // eje de tiempo (default "semana")
+  calIncluyeForecast: boolean;       // false = solo firme (bForecast=0)
+  // Modo del panel. Corte 1 solo "requerimiento"; "embarques"/"ambos" reservados
+  // para la fase 2 (historial de embarques). Se deja en el store para no
+  // rehacer la firma cuando llegue.
+  calModo: CalModo;
+  celdaDetalle: CeldaDetalleOpen | null;
+
   // Modo de visualizacion y filtros del sidebar (client-side)
   mode: Mode;
   expanded: Set<number>;             // idComp expandidos en el canvas
@@ -110,6 +143,12 @@ interface UiStore {
   setFlujoPlantaDrill: (p: { idPlanta: number; nombre: string } | null) => void;
   setFlujoResaltados: (names: string[]) => void;
   togglePlantaColapsada: (idPlanta: number) => void;
+  setSidebarExpanded: (v: boolean) => void;
+  toggleSidebarExpanded: () => void;
+  setCalGranularidad: (g: CalGranularidad) => void;
+  setCalIncluyeForecast: (v: boolean) => void;
+  setCalModo: (m: CalModo) => void;
+  setCeldaDetalle: (c: CeldaDetalleOpen | null) => void;
   clearSelection: () => void;
 }
 
@@ -128,12 +167,18 @@ export const useUiStore = create<UiStore>((set) => ({
   flujoResaltados: [],
   plantasColapsadas: new Set(),
 
+  sidebarExpanded: false,
+  calGranularidad: "semana",
+  calIncluyeForecast: false,
+  calModo: "requerimiento",
+  celdaDetalle: null,
+
   mode: "inventario",
   expanded: new Set(),
   filters: {
-    clienteId: null,
+    clienteIds: [],
     ciudadIds: [],
-    pt: "",
+    ptIds: [],
     fechaMax: "",
     plantaId: null,
     tipoMaterialIds: [],
@@ -216,5 +261,16 @@ export const useUiStore = create<UiStore>((set) => ({
       else next.add(idPlanta);
       return { plantasColapsadas: next };
     }),
+  setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
+  // Al cerrar el panel se cierra tambien el popover de detalle abierto.
+  toggleSidebarExpanded: () =>
+    set((s) => ({
+      sidebarExpanded: !s.sidebarExpanded,
+      celdaDetalle: s.sidebarExpanded ? null : s.celdaDetalle,
+    })),
+  setCalGranularidad: (g) => set({ calGranularidad: g, celdaDetalle: null }),
+  setCalIncluyeForecast: (v) => set({ calIncluyeForecast: v, celdaDetalle: null }),
+  setCalModo: (m) => set({ calModo: m }),
+  setCeldaDetalle: (c) => set({ celdaDetalle: c }),
   clearSelection: () => set({ selectedPtIds: [], activeTabId: null, view: "summary" }),
 }));

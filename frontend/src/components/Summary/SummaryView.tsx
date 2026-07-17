@@ -16,7 +16,7 @@ import { FlujoPlantasCanvas } from "./FlujoPlantasCanvas";
 import { TipoMaterialSelect } from "./TipoMaterialSelect";
 
 export function SummaryView() {
-  const clienteId = useUiStore((s) => s.filters.clienteId);
+  const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
   const claseIds = useUiStore((s) => s.filters.claseIds);
@@ -26,7 +26,7 @@ export function SummaryView() {
   const setFilter = useUiStore((s) => s.setFilter);
   // El inventario ya no se filtra por planta: las tarjetas se agrupan por planta.
   const { data: bloques, isLoading, error, isFetching } = useBloques(
-    clienteId,
+    clienteIds,
     null,
     ciudadIds,
     tipoMaterialIds,
@@ -103,10 +103,12 @@ export function SummaryView() {
               value={tipoMaterialIds}
               onChange={(v) => setFilter("tipoMaterialIds", v)}
             />
-            {clienteId !== null ? (
+            {clienteIds.length > 0 ? (
               <FilterChip
-                label="Cliente fijado"
-                onRemove={() => setFilter("clienteId", null)}
+                label={
+                  clienteIds.length === 1 ? "1 cliente" : `${clienteIds.length} clientes`
+                }
+                onRemove={() => setFilter("clienteIds", [])}
               />
             ) : null}
             {ciudadIds.length > 0 ? (

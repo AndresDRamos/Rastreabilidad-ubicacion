@@ -27,10 +27,10 @@
 -- El universo de componentes (#comp) siempre acota a PTs con demanda activa.
 --
 -- Parametros (NULL = sin filtro):
---   @idCliente  int   Restringe la demanda a ese cliente.
 --   (No hay @idPlantaFiltro: el overview muestra TODAS las plantas.)
 --
 -- Placeholders reemplazados desde Python (identicos a Q_flujo.sql):
+--   /*CLIENTES_FILTER*/   "AND d.idCliente IN (...)" o "".
 --   /*CIUDADES_FILTER*/   "AND d.idCiudad IN (...)" o "".
 --   /*CLASE_FILTER*/      "AND I.CLASS_ID_ARTCULO_ID IN (...)" o "".
 --   /*PT_UNIVERSO_FILTER*/ "AND d.idMaterial IN (...)" o ""  (Caterpillar CSV).
@@ -38,8 +38,6 @@
 -- =============================================================================
 
 SET NOCOUNT ON;
-
-DECLARE @idCliente int = @idCliente;
 
 -- (0) Universo de componentes (PTs con demanda activa -> sus PT/Intermedios) ---
 ;WITH cteDem AS
@@ -49,7 +47,7 @@ DECLARE @idCliente int = @idCliente;
     LEFT JOIN NETSUITE.dbo.ITEMS I ON I.ITEM_ID = d.ItemID
     WHERE d.bActivo = 1
         AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
-        AND (@idCliente IS NULL OR d.idCliente = @idCliente)
+    /*CLIENTES_FILTER*/
     /*CIUDADES_FILTER*/
     /*CLASE_FILTER*/
     /*PT_UNIVERSO_FILTER*/

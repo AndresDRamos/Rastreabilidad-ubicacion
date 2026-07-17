@@ -5,10 +5,12 @@ import type {
   ArbolPT,
   BloqueBucket,
   BloqueProceso,
+  CeldaCalendario,
   EtiquetaDetalle,
   FilaListado,
   FlujoPlantasResponse,
   FlujoResponse,
+  OrdenLinea,
   Planta,
   PTEnProceso,
   Universo,
@@ -64,13 +66,14 @@ function idsCsv(ids: number[] | undefined): string | undefined {
 const ciudadesCsv = idsCsv;
 
 export function useBloques(
-  cliente: number | null = null,
+  clienteIds: number[] = [],
   planta: number | null = null,
   ciudadIds: number[] = [],
   tipoMaterialIds: number[] = [],
   claseIds: number[] = [],
   universo: Universo = "general",
 ) {
+  const clientesKey = idsCsv(clienteIds) ?? "";
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
   const tiposKey = idsCsv(tipoMaterialIds) ?? "";
   const clasesKey = idsCsv(claseIds) ?? "";
@@ -78,7 +81,7 @@ export function useBloques(
     queryKey: [
       "bloques",
       universo,
-      cliente,
+      clientesKey,
       planta,
       ciudadesKey,
       tiposKey,
@@ -86,7 +89,8 @@ export function useBloques(
     ],
     queryFn: async () => {
       const params: Record<string, string | number> = {};
-      if (cliente != null) params.cliente = cliente;
+      const clientes = idsCsv(clienteIds);
+      if (clientes) params.clientes = clientes;
       if (planta != null) params.planta = planta;
       const ciud = ciudadesCsv(ciudadIds);
       if (ciud) params.ciudades = ciud;
@@ -105,13 +109,14 @@ export function useBloques(
 }
 
 export function useFlujo(
-  cliente: number | null = null,
+  clienteIds: number[] = [],
   planta: number | null = null,
   ciudadIds: number[] = [],
   tipoMaterialIds: number[] = [],
   claseIds: number[] = [],
   universo: Universo = "general",
 ) {
+  const clientesKey = idsCsv(clienteIds) ?? "";
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
   const tiposKey = idsCsv(tipoMaterialIds) ?? "";
   const clasesKey = idsCsv(claseIds) ?? "";
@@ -119,7 +124,7 @@ export function useFlujo(
     queryKey: [
       "flujo",
       universo,
-      cliente,
+      clientesKey,
       planta,
       ciudadesKey,
       tiposKey,
@@ -127,7 +132,8 @@ export function useFlujo(
     ],
     queryFn: async () => {
       const params: Record<string, string | number> = {};
-      if (cliente != null) params.cliente = cliente;
+      const clientes = idsCsv(clienteIds);
+      if (clientes) params.clientes = clientes;
       if (planta != null) params.planta = planta;
       const ciud = ciudadesCsv(ciudadIds);
       if (ciud) params.ciudades = ciud;
@@ -144,12 +150,13 @@ export function useFlujo(
 }
 
 export function useFlujoPlantas(
-  cliente: number | null = null,
+  clienteIds: number[] = [],
   ciudadIds: number[] = [],
   tipoMaterialIds: number[] = [],
   claseIds: number[] = [],
   universo: Universo = "general",
 ) {
+  const clientesKey = idsCsv(clienteIds) ?? "";
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
   const tiposKey = idsCsv(tipoMaterialIds) ?? "";
   const clasesKey = idsCsv(claseIds) ?? "";
@@ -157,14 +164,15 @@ export function useFlujoPlantas(
     queryKey: [
       "flujo-plantas",
       universo,
-      cliente,
+      clientesKey,
       ciudadesKey,
       tiposKey,
       clasesKey,
     ],
     queryFn: async () => {
       const params: Record<string, string | number> = {};
-      if (cliente != null) params.cliente = cliente;
+      const clientes = idsCsv(clienteIds);
+      if (clientes) params.clientes = clientes;
       const ciud = ciudadesCsv(ciudadIds);
       if (ciud) params.ciudades = ciud;
       const tipos = idsCsv(tipoMaterialIds);
@@ -184,13 +192,14 @@ export function useFlujoPlantas(
 
 export function usePtsEnProceso(
   idProceso: number | null,
-  cliente: number | null = null,
+  clienteIds: number[] = [],
   planta: number | null = null,
   ciudadIds: number[] = [],
   tipoMaterialIds: number[] = [],
   claseIds: number[] = [],
   universo: Universo = "general",
 ) {
+  const clientesKey = idsCsv(clienteIds) ?? "";
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
   const tiposKey = idsCsv(tipoMaterialIds) ?? "";
   const clasesKey = idsCsv(claseIds) ?? "";
@@ -199,7 +208,7 @@ export function usePtsEnProceso(
       "pts-en-proceso",
       universo,
       idProceso,
-      cliente,
+      clientesKey,
       planta,
       ciudadesKey,
       tiposKey,
@@ -208,7 +217,8 @@ export function usePtsEnProceso(
     enabled: idProceso !== null,
     queryFn: async () => {
       const params: Record<string, string | number> = {};
-      if (cliente != null) params.cliente = cliente;
+      const clientes = idsCsv(clienteIds);
+      if (clientes) params.clientes = clientes;
       if (planta != null) params.planta = planta;
       const ciud = ciudadesCsv(ciudadIds);
       if (ciud) params.ciudades = ciud;
@@ -230,7 +240,7 @@ export function usePtsEnProceso(
 export function useEtiquetasDetalle(
   idProceso: number | null,
   bucket: BloqueBucket | null,
-  cliente: number | null = null,
+  clienteIds: number[] = [],
   planta: number | null = null,
   ciudadIds: number[] = [],
   tipoMaterialIds: number[] = [],
@@ -238,6 +248,7 @@ export function useEtiquetasDetalle(
   universo: Universo = "general",
   destino: number | null = null,
 ) {
+  const clientesKey = idsCsv(clienteIds) ?? "";
   const ciudadesKey = ciudadesCsv(ciudadIds) ?? "";
   const tiposKey = idsCsv(tipoMaterialIds) ?? "";
   const clasesKey = idsCsv(claseIds) ?? "";
@@ -248,7 +259,7 @@ export function useEtiquetasDetalle(
       idProceso,
       bucket,
       destino,
-      cliente,
+      clientesKey,
       planta,
       ciudadesKey,
       tiposKey,
@@ -257,7 +268,8 @@ export function useEtiquetasDetalle(
     enabled: idProceso !== null && bucket !== null,
     queryFn: async () => {
       const params: Record<string, string | number> = { bucket: bucket! };
-      if (cliente != null) params.cliente = cliente;
+      const clientes = idsCsv(clienteIds);
+      if (clientes) params.clientes = clientes;
       if (planta != null) params.planta = planta;
       const ciud = ciudadesCsv(ciudadIds);
       if (ciud) params.ciudades = ciud;
@@ -289,5 +301,70 @@ export function usePlantas() {
       return data;
     },
     staleTime: 10 * 60 * 1000, // las plantas no cambian seguido
+  });
+}
+
+// Calendario de requerimiento (panel expandible). Igual que usePts: los mismos
+// params server-side (universo, ventana, fechaMax). Cliente/ciudad/forecast/
+// granularidad se resuelven client-side sobre el result-set, sin re-fetch.
+export function useRequerimientoCalendario(
+  ventana: number = 3,
+  fechaMax: string = "",
+  universo: Universo = "general",
+) {
+  const fechaMaxParam = fechaMax || undefined;
+  return useQuery<CeldaCalendario[]>({
+    queryKey: ["requerimiento-cal", universo, ventana, fechaMaxParam ?? null],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { ventana };
+      if (fechaMaxParam) params.fecha_max = fechaMaxParam;
+      if (universo !== "general") params.universo = universo;
+      const { data } = await apiClient.get<CeldaCalendario[]>(
+        "/requerimiento/calendario",
+        { params },
+      );
+      return data;
+    },
+    staleTime: 5 * 60 * 1000, // 5 min — espeja TTL backend (como /pts)
+  });
+}
+
+// Detalle de una celda del calendario: lineas de orden de venta. desde=null =>
+// columna past-due (todo lo anterior a hasta). Solo corre con idMaterial != null.
+export function useOrdenDetalle(
+  idMaterial: number | null,
+  cliente: number | null = null,
+  ciudad: number | null = null,
+  desde: string | null = null,
+  hasta: string | null = null,
+  forecast: boolean = false,
+) {
+  return useQuery<OrdenLinea[]>({
+    queryKey: [
+      "orden-detalle",
+      idMaterial,
+      cliente,
+      ciudad,
+      desde,
+      hasta,
+      forecast,
+    ],
+    enabled: idMaterial !== null,
+    queryFn: async () => {
+      const params: Record<string, string | number | boolean> = {
+        idMaterial: idMaterial!,
+      };
+      if (cliente != null) params.cliente = cliente;
+      if (ciudad != null) params.ciudad = ciudad;
+      if (desde) params.desde = desde;
+      if (hasta) params.hasta = hasta;
+      if (forecast) params.forecast = true;
+      const { data } = await apiClient.get<OrdenLinea[]>(
+        "/requerimiento/orden-detalle",
+        { params },
+      );
+      return data;
+    },
+    staleTime: 2 * 60 * 1000,
   });
 }

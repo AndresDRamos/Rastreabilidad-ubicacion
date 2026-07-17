@@ -34,6 +34,38 @@ class FilaListado(_Base):
     LineasForecast: int
 
 
+class CeldaCalendario(_Base):
+    """Una fila del result-set de Q_requerimiento_calendario.sql.
+
+    Demanda activa desagregada por (PT x Cliente x Ciudad x Fecha[dia] x
+    bForecast). El frontend agrupa por (idMaterial, idCliente, idCiudad) y
+    bucketiza `Fecha` a dia/semana/mes; el past-due es la suma de dias < hoy.
+    PiezasPend ya descuenta lo embarcado.
+    """
+    idMaterial: int
+    PT: str
+    Descripcion: str
+    idCliente: Optional[int] = None
+    Cliente: str
+    idCiudad: Optional[int] = None
+    Ciudad: str
+    Fecha: date
+    bForecast: bool
+    PiezasPend: float
+
+
+class OrdenLinea(_Base):
+    """Una linea de demanda que compone una celda del calendario (popover de
+    detalle). Sale de Q_orden_detalle.sql."""
+    OrdenVenta: Optional[str] = None
+    POHeader: Optional[str] = None
+    POLine: Optional[str] = None
+    Fecha: date
+    bForecast: bool
+    PiezasPend: float
+    PrecioUnitario: Optional[float] = None
+
+
 class DemandaPT(_Base):
     idMaterial: int
     PT: str

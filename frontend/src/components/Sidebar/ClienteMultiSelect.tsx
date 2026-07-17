@@ -4,13 +4,15 @@ import { usePts } from "@/api/queries";
 import { useUiStore } from "@/store/useUiStore";
 
 /**
- * Combobox de clientes derivado de los PTs con demanda activa.
- * Almacena `clienteId` (number | null) en el store, no el nombre.
+ * Multi-select de clientes derivado de los PTs con demanda activa.
+ *
+ * Almacena `clienteIds: number[]` en el store. El backend recibe el CSV
+ * `?clientes=6,8` para acotar el universo de Q_bloques / Q_pts_en_proceso.
  */
-export function ClienteCombobox() {
+export function ClienteMultiSelect() {
   const ventana = useUiStore((s) => s.ventana);
   const fechaMax = useUiStore((s) => s.filters.fechaMax);
-  const clienteId = useUiStore((s) => s.filters.clienteId);
+  const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const setFilter = useUiStore((s) => s.setFilter);
   const { data: filas } = usePts(ventana, fechaMax);
 
@@ -27,21 +29,22 @@ export function ClienteCombobox() {
       .sort((a, b) => a.nombre.localeCompare(b.nombre, "es-MX"));
   }, [filas]);
 
-  const nombreSeleccionado = useMemo(() => {
-    if (clienteId == null) return "";
-    return opciones.find((o) => o.id === clienteId)?.nombre ?? "";
-  }, [clienteId, opciones]);
+  // Cuando cambia el universo de PTs, quitar del filtro los clientes que ya
+  // no aparecen. No correr mientras `filas` carga (opciones=[] borraria todo).
+  useEffect(() => {
+    if (!filas) return;
+    if (clienteIds.length === 0) return;
+    const validIds = new Set(opciones.map((o) => o.id));
+    const next = clienteIds.filter((id) => validIds.has(id));
+    if (next.length !== clienteIds.length) {
+      setFilter("clienteIds", next);
+    }
+  }, [filas, opciones, clienteIds, setFilter]);
 
-  const [query, setQuery] = useState(nombreSeleccionado);
+  const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // Si cambia el cliente seleccionado desde afuera, sincronizar el input.
-  useEffect(() => {
-    setQuery(nombreSeleccionado);
-  }, [nombreSeleccionado]);
-
-  // Cerrar al click fuera.
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (!wrapRef.current) return;
@@ -53,36 +56,59 @@ export function ClienteCombobox() {
 
   const filtradas = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q || q === nombreSeleccionado.toLowerCase()) return opciones;
+    if (!q) return opciones;
     return opciones.filter((o) => o.nombre.toLowerCase().includes(q));
-  }, [opciones, query, nombreSeleccionado]);
+  }, [opciones, query]);
+
+  const placeholder =
+    clienteIds.length === 0
+      ? "Cliente"
+      : clienteIds.length === 1
+        ? opciones.find((o) => o.id === clienteIds[0])?.nombre ?? "1 cliente"
+        : `${clienteIds.length} clientes`;
+
+  function toggle(id: number) {
+    if (clienteIds.includes(id)) {
+      setFilter(
+        "clienteIds",
+        clienteIds.filter((x) => x !== id),
+      );
+    } else {
+      setFilter("clienteIds", [...clienteIds, id]);
+    }
+  }
 
   return (
     <div ref={wrapRef} className="relative">
       <div className="relative">
         <input
           type="text"
-          placeholder="Cliente"
-          value={query}
+          placeholder={placeholder}
+          value={open ? query : ""}
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
-            // Limpiar seleccion en cuanto el usuario empieza a editar.
-            if (clienteId !== null) setFilter("clienteId", null);
           }}
-          onFocus={() => setOpen(true)}
-          className="w-full h-9 pl-3 pr-7 text-sm rounded-md border border-surface-border bg-white text-ink placeholder:text-ink-subtle focus:outline-none focus:ring-2 focus:ring-status-pt/30 focus:border-status-pt/50 transition"
+          onFocus={() => {
+            setQuery("");
+            setOpen(true);
+          }}
+          className={`w-full h-9 pl-3 pr-7 text-sm rounded-md border border-surface-border bg-white text-ink focus:outline-none focus:ring-2 focus:ring-status-pt/30 focus:border-status-pt/50 transition ${
+            clienteIds.length > 0 && !open
+              ? "placeholder:text-ink"
+              : "placeholder:text-ink-subtle"
+          }`}
           role="combobox"
           aria-expanded={open}
           aria-autocomplete="list"
         />
-        {clienteId !== null || query ? (
+        {clienteIds.length > 0 ? (
           <button
             type="button"
-            aria-label="Limpiar cliente"
+            aria-label="Limpiar clientes"
             onClick={() => {
+              setFilter("clienteIds", []);
               setQuery("");
-              setFilter("clienteId", null);
               setOpen(false);
             }}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-ink-subtle hover:text-ink rounded"
@@ -105,36 +131,43 @@ export function ClienteCombobox() {
         ) : null}
       </div>
 
-      {open && filtradas.length > 0 ? (
+      {open && opciones.length > 0 ? (
         <ul
           className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-surface-border bg-white shadow-card"
           role="listbox"
+          aria-multiselectable="true"
         >
-          {filtradas.slice(0, 50).map((o) => {
-            const isSelected = o.id === clienteId;
+          {filtradas.slice(0, 80).map((o) => {
+            const isSelected = clienteIds.includes(o.id);
             return (
               <li key={o.id}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setFilter("clienteId", o.id);
-                    setQuery(o.nombre);
-                    setOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-surface-subtle transition ${
-                    isSelected ? "bg-status-pt/10 text-status-pt" : "text-ink"
+                  onClick={() => toggle(o.id)}
+                  className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-surface-subtle transition ${
+                    isSelected ? "bg-status-pt/5 text-ink" : "text-ink"
                   }`}
                   role="option"
                   aria-selected={isSelected}
                 >
-                  {o.nombre}
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    readOnly
+                    className="h-3.5 w-3.5 rounded border-surface-border text-status-pt accent-status-pt"
+                  />
+                  <span className="flex-1 truncate">{o.nombre}</span>
                 </button>
               </li>
             );
           })}
-          {filtradas.length > 50 ? (
+          {filtradas.length === 0 ? (
             <li className="px-3 py-1.5 text-xs text-ink-subtle italic">
-              +{filtradas.length - 50} mas... refina tu busqueda
+              Sin coincidencias
+            </li>
+          ) : filtradas.length > 80 ? (
+            <li className="px-3 py-1.5 text-xs text-ink-subtle italic">
+              +{filtradas.length - 80} mas... refina tu busqueda
             </li>
           ) : null}
         </ul>

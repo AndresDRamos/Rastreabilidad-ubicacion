@@ -28,17 +28,16 @@
 -- Parametros:
 --   @idProcesoSelected int   Obligatorio (es X, el bloque del que dependeran
 --                            las metricas).
---   @idCliente         int?  Default NULL (sin filtro de cliente).
 --   @idPlantaFiltro    int?  Default NULL (sin filtro de planta).
 --
 -- Placeholders reemplazados desde Python:
+--   /*CLIENTES_FILTER*/  "AND d.idCliente IN (...)" o "".
 --   /*CIUDADES_FILTER*/  "AND d.idCiudad IN (...)" o "".
 --   /*TIPOMAT_FILTER*/   "AND m.idTipoMaterial IN (...)" o "".
 --   /*CLASE_FILTER*/     "AND I.CLASS_ID_ARTCULO_ID IN (...)" o "".
 -- =============================================================================
 
 DECLARE @idProcesoSelected int = @idProcesoSelected;
-DECLARE @idCliente         int = @idCliente;
 DECLARE @idPlantaFiltro    int = @idPlantaFiltro;
 
 WITH
@@ -49,7 +48,7 @@ WITH
         LEFT JOIN NETSUITE.dbo.ITEMS I ON I.ITEM_ID = d.ItemID
         WHERE d.bActivo = 1
             AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
-            AND (@idCliente IS NULL OR d.idCliente = @idCliente)
+        /*CLIENTES_FILTER*/
         /*CIUDADES_FILTER*/
         /*CLASE_FILTER*/
         /*PT_UNIVERSO_FILTER*/

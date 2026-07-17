@@ -4,61 +4,52 @@ import { usePts } from "@/api/queries";
 import { useUiStore } from "@/store/useUiStore";
 
 /**
- * Multi-select de ciudades derivado de los PTs con demanda activa.
- * Si hay clientes fijados, restringe las opciones a las ciudades de esos
- * clientes.
+ * Multi-select de numeros de parte (PT) derivado de los PTs con demanda
+ * activa. Las opciones se acotan por los demas filtros activos (cliente,
+ * ciudad, clase), igual que CiudadMultiSelect acota por clienteIds.
  *
- * Almacena `ciudadIds: number[]` en el store. El backend recibe el CSV
- * `?ciudades=137,737` para acotar el universo de Q_bloques / Q_pts_en_proceso.
+ * Almacena `ptIds: number[]` en el store (idMaterial, no el string PT).
  */
-export function CiudadMultiSelect() {
+export function NumeroParteMultiSelect() {
   const ventana = useUiStore((s) => s.ventana);
   const fechaMax = useUiStore((s) => s.filters.fechaMax);
   const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
+  const claseIds = useUiStore((s) => s.filters.claseIds);
+  const ptIds = useUiStore((s) => s.filters.ptIds);
   const setFilter = useUiStore((s) => s.setFilter);
   const { data: filas } = usePts(ventana, fechaMax);
 
   const opciones = useMemo(() => {
     if (!filas) return [] as { id: number; nombre: string }[];
     const clienteSet = clienteIds.length > 0 ? new Set(clienteIds) : null;
+    const ciudadSet = ciudadIds.length > 0 ? new Set(ciudadIds) : null;
+    const claseSet = claseIds.length > 0 ? new Set(claseIds) : null;
     const seen = new Map<number, string>();
     for (const f of filas) {
       if (clienteSet != null && (f.idCliente == null || !clienteSet.has(f.idCliente))) continue;
-      if (f.idCiudad != null && !seen.has(f.idCiudad)) {
-        seen.set(f.idCiudad, f.Ciudad);
+      if (ciudadSet != null && (f.idCiudad == null || !ciudadSet.has(f.idCiudad))) continue;
+      if (claseSet != null && (f.idClase == null || !claseSet.has(f.idClase))) continue;
+      if (!seen.has(f.idMaterial)) {
+        seen.set(f.idMaterial, f.PT);
       }
     }
     return Array.from(seen.entries())
       .map(([id, nombre]) => ({ id, nombre }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre, "es-MX"));
-  }, [filas, clienteIds]);
+  }, [filas, clienteIds, ciudadIds, claseIds]);
 
-  // Cascada de dependencia: si el cliente pasa de tener seleccion a quedar
-  // vacio, la ciudad depende semanticamente del cliente y se limpia entera
-  // (no solo se purgan invalidas, porque al quedar clienteIds=[] el universo
-  // de `opciones` pasa a ser TODAS las ciudades y la purga por invalidez ya
-  // no dispara). Con clienteIds no-vacio, se mantiene la purga fina de
-  // ciudades que dejaron de pertenecer a los clientes seleccionados.
-  const prevHadClienteRef = useRef(clienteIds.length > 0);
+  // Cuando cambia el universo de opciones (otros filtros), quitar del filtro
+  // los numeros de parte que ya no aplican. No correr mientras `filas` carga.
   useEffect(() => {
     if (!filas) return;
-    const hadCliente = prevHadClienteRef.current;
-    const hasCliente = clienteIds.length > 0;
-    if (hadCliente && !hasCliente) {
-      if (ciudadIds.length > 0) setFilter("ciudadIds", []);
-      prevHadClienteRef.current = hasCliente;
-      return;
-    }
-    prevHadClienteRef.current = hasCliente;
-
-    if (ciudadIds.length === 0) return;
+    if (ptIds.length === 0) return;
     const validIds = new Set(opciones.map((o) => o.id));
-    const next = ciudadIds.filter((id) => validIds.has(id));
-    if (next.length !== ciudadIds.length) {
-      setFilter("ciudadIds", next);
+    const next = ptIds.filter((id) => validIds.has(id));
+    if (next.length !== ptIds.length) {
+      setFilter("ptIds", next);
     }
-  }, [filas, opciones, ciudadIds, clienteIds, setFilter]);
+  }, [filas, opciones, ptIds, setFilter]);
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -80,27 +71,20 @@ export function CiudadMultiSelect() {
   }, [opciones, query]);
 
   const placeholder =
-    ciudadIds.length === 0
-      ? "Ciudad"
-      : ciudadIds.length === 1
-        ? opciones.find((o) => o.id === ciudadIds[0])?.nombre ?? "1 ciudad"
-        : `${ciudadIds.length} ciudades`;
-
-  // Solo mostrar el selector cuando hay al menos un cliente seleccionado Y
-  // ese universo tiene mas de un destino. Sin cliente, no aparece. Mientras
-  // `filas` carga el componente queda montado para no perder la seleccion
-  // previa.
-  if (clienteIds.length === 0) return null;
-  if (filas && opciones.length <= 1) return null;
+    ptIds.length === 0
+      ? "Numero de parte"
+      : ptIds.length === 1
+        ? opciones.find((o) => o.id === ptIds[0])?.nombre ?? "1 numero de parte"
+        : `${ptIds.length} numeros de parte`;
 
   function toggle(id: number) {
-    if (ciudadIds.includes(id)) {
+    if (ptIds.includes(id)) {
       setFilter(
-        "ciudadIds",
-        ciudadIds.filter((x) => x !== id),
+        "ptIds",
+        ptIds.filter((x) => x !== id),
       );
     } else {
-      setFilter("ciudadIds", [...ciudadIds, id]);
+      setFilter("ptIds", [...ptIds, id]);
     }
   }
 
@@ -120,7 +104,7 @@ export function CiudadMultiSelect() {
             setOpen(true);
           }}
           className={`w-full h-9 pl-3 pr-7 text-sm rounded-md border border-surface-border bg-white text-ink focus:outline-none focus:ring-2 focus:ring-status-pt/30 focus:border-status-pt/50 transition ${
-            ciudadIds.length > 0 && !open
+            ptIds.length > 0 && !open
               ? "placeholder:text-ink"
               : "placeholder:text-ink-subtle"
           }`}
@@ -128,12 +112,12 @@ export function CiudadMultiSelect() {
           aria-expanded={open}
           aria-autocomplete="list"
         />
-        {ciudadIds.length > 0 ? (
+        {ptIds.length > 0 ? (
           <button
             type="button"
-            aria-label="Limpiar ciudades"
+            aria-label="Limpiar numeros de parte"
             onClick={() => {
-              setFilter("ciudadIds", []);
+              setFilter("ptIds", []);
               setQuery("");
               setOpen(false);
             }}
@@ -164,7 +148,7 @@ export function CiudadMultiSelect() {
           aria-multiselectable="true"
         >
           {filtradas.slice(0, 80).map((o) => {
-            const isSelected = ciudadIds.includes(o.id);
+            const isSelected = ptIds.includes(o.id);
             return (
               <li key={o.id}>
                 <button
@@ -182,7 +166,7 @@ export function CiudadMultiSelect() {
                     readOnly
                     className="h-3.5 w-3.5 rounded border-surface-border text-status-pt accent-status-pt"
                   />
-                  <span className="flex-1 truncate">{o.nombre}</span>
+                  <span className="flex-1 truncate font-mono">{o.nombre}</span>
                 </button>
               </li>
             );

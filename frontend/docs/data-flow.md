@@ -196,6 +196,8 @@ useArbol(idPt, ventana, fechaMax)  → staleTime: Infinity,       // cache de se
 useBloques(...)                    → staleTime: 2 * 60_000     // 2 min
 usePtsEnProceso(...)               → staleTime: 2 * 60_000     // 2 min
 usePlantas()                       → staleTime: 10 * 60_000    // 10 min
+useRequerimientoCalendario(...)    → staleTime: 5 * 60_000     // 5 min (espeja usePts)
+useOrdenDetalle(...)               → staleTime: 2 * 60_000     // 2 min
 ```
 
 Implicaciones:

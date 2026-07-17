@@ -18,11 +18,6 @@ function fmtInt(n: number): string {
   return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(n);
 }
 
-function matchesFilter(value: string, query: string): boolean {
-  if (!query) return true;
-  return value.toLowerCase().includes(query.toLowerCase());
-}
-
 function pickMetric(pt: PTEnProceso, m: DrilldownMetric): number {
   switch (m) {
     case "disponibles":
@@ -53,7 +48,7 @@ export function PtTable() {
   // no un filtro global de planta (que ya no existe en el Resumen).
   const { data: ptsEnProceso, isLoading: loadingProceso } = usePtsEnProceso(
     procesoFiltro?.idProceso ?? null,
-    filters.clienteId,
+    filters.clienteIds,
     procesoFiltro?.idPlanta ?? null,
     filters.ciudadIds,
     filters.tipoMaterialIds,
@@ -80,10 +75,11 @@ export function PtTable() {
       filters.ciudadIds.length > 0 ? new Set(filters.ciudadIds) : null;
     const base = filas.filter(
       (f) =>
-        (filters.clienteId == null || f.idCliente === filters.clienteId) &&
+        (filters.clienteIds.length === 0 ||
+          (f.idCliente != null && filters.clienteIds.includes(f.idCliente))) &&
         (ciudadSet == null ||
           (f.idCiudad != null && ciudadSet.has(f.idCiudad))) &&
-        matchesFilter(f.PT, filters.pt),
+        (filters.ptIds.length === 0 || filters.ptIds.includes(f.idMaterial)),
     );
     // Si hay filtro de proceso activo, intersectar con el set de Q2.
     const ptsAllowed = procesoFiltro && ptsEnProceso

@@ -12,7 +12,7 @@ const BUCKET_EMPTY: Record<string, string> = {
 export function EtiquetasDrawer() {
   const bloqueDetalle = useUiStore((s) => s.bloqueDetalle);
   const setBloqueDetalle = useUiStore((s) => s.setBloqueDetalle);
-  const clienteId = useUiStore((s) => s.filters.clienteId);
+  const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
   const claseIds = useUiStore((s) => s.filters.claseIds);
@@ -21,7 +21,7 @@ export function EtiquetasDrawer() {
   const { data, isLoading, isFetching, error } = useEtiquetasDetalle(
     bloqueDetalle?.idProceso ?? null,
     bloqueDetalle?.bucket ?? null,
-    clienteId,
+    clienteIds,
     bloqueDetalle?.idPlanta ?? null,
     ciudadIds,
     tipoMaterialIds,

@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .config import get_settings
 from .logging_setup import CorrelationIdMiddleware, configurar_logging, log
-from .routers import arbol, bloques, export, health, pts
+from .routers import arbol, bloques, export, health, pts, requerimiento
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -51,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(pts.router)
     app.include_router(arbol.router)
     app.include_router(bloques.router)
+    app.include_router(requerimiento.router)
     app.include_router(export.router)
 
     # Static frontend (build de produccion). En dev no existe; en prod copiamos

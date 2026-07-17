@@ -33,20 +33,18 @@
 -- Excluye etiquetas ya remisionadas (presentes en vwEtiquetasEnRemision).
 --
 -- Parametros (NULL = sin filtro):
---   @idCliente         int  Restringe universo a componentes de PTs con
---                           demanda activa de ese cliente.
 --   @idPlantaFiltro    int  Filtra por e.idPlantaProceso.
 --   @conFiltroUniverso bit  Cuando = 1 acota a componentes con demanda activa
 --                           segun los filtros (cliente/ciudades/clase). Cuando
 --                           = 0, vista total EZI.
 --
 -- Placeholders reemplazados desde Python:
+--   /*CLIENTES_FILTER*/  "AND d.idCliente IN (...)" o "".
 --   /*CIUDADES_FILTER*/  "AND d.idCiudad IN (...)" o "".
 --   /*TIPOMAT_FILTER*/   "AND m.idTipoMaterial IN (...)" o "".
 --   /*CLASE_FILTER*/     "AND I.CLASS_ID_ARTCULO_ID IN (...)" o "".
 -- =============================================================================
 
-DECLARE @idCliente         int = @idCliente;
 DECLARE @idPlantaFiltro    int = @idPlantaFiltro;
 DECLARE @conFiltroUniverso bit = @conFiltroUniverso;
 
@@ -58,7 +56,7 @@ WITH
         LEFT JOIN NETSUITE.dbo.ITEMS I ON I.ITEM_ID = d.ItemID
         WHERE d.bActivo = 1
             AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
-            AND (@idCliente IS NULL OR d.idCliente = @idCliente)
+        /*CLIENTES_FILTER*/
         /*CIUDADES_FILTER*/
         /*CLASE_FILTER*/
         /*PT_UNIVERSO_FILTER*/

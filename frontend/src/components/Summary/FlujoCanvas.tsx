@@ -29,7 +29,7 @@ const NODE_TYPES = { flujoProc: FlujoProcessNode, flujoGateway: FlujoGatewayNode
 const EDGE_TYPES = { flujoEdge: FlujoEdge };
 
 function FlujoCanvasInner({ planta }: { planta: number | null }) {
-  const clienteId = useUiStore((s) => s.filters.clienteId);
+  const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const plantaId = planta;
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const tipoMaterialIds = useUiStore((s) => s.filters.tipoMaterialIds);
@@ -40,7 +40,7 @@ function FlujoCanvasInner({ planta }: { planta: number | null }) {
   const setFlujoResaltados = useUiStore((s) => s.setFlujoResaltados);
 
   const { data, isLoading, isFetching, error } = useFlujo(
-    clienteId,
+    clienteIds,
     plantaId,
     ciudadIds,
     tipoMaterialIds,
