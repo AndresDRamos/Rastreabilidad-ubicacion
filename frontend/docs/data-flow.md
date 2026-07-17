@@ -140,7 +140,7 @@
        ▼
 [4] Cada nodo recalcula su número grande
    (PtNode: piezasPend vs wipTotal,
-    ComponentNode: reqBufferFaltante vs wipBuffer)
+    ComponentNode: reqNeto vs wipBuffer)
 ```
 
 **NO se refetchea** (useArbol no se vuelve a llamar).
@@ -239,7 +239,8 @@ ArbolPT (response del backend)  +  expanded: Set<number>  +  highlight?: Highlig
     ▼
 [3] Para cada componente C en arbol.componentes (sin el PT):
     - Calcula ultimoPasoReal (último PasoRuta no virtual)
-    - Calcula wipBuffer (PasoRuta virtual.wip_en_paso) y reqBufferFaltante
+    - Calcula wipBuffer (PasoRuta virtual.wip_en_paso); el modo
+      requerimiento usa req_neto tal cual viene del backend
     - Calcula status (covered/partial/empty/neutral) con statusDeComponente()
     - Emite 1 nodo "component" con esa data + expandable + expanded + cantPadre
     │

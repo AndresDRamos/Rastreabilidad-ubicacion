@@ -180,9 +180,11 @@ PasoRuta(
 
 **En el frontend**:
 
-- `frontend/src/lib/buildGraph.ts` extrae `wipBuffer = ultimo_paso.wip_en_paso` cuando `es_virtual=true`.
-- `reqBufferFaltante = max(0, req_bruto - wipBuffer)` es lo que muestra la card en modo Requerimiento.
+- `frontend/src/lib/buildGraph.ts` extrae `wipBuffer = ultimo_paso.wip_en_paso` cuando `es_virtual=true`. Es lo que muestra la card en modo **Inventario** ("en buffer").
+- En modo **Requerimiento** la card muestra `req_neto` — lo que realmente falta fabricar, descontando **todo** el WIP del componente (en cualquier proceso), no solo el del buffer.
 - El paso virtual **no se renderiza como nodo visible** aunque el componente esté expandido — alimenta la card.
+
+> **Histórico**: hasta 2026-07 la card mostraba `reqBufferFaltante = max(0, req_bruto - wipBuffer)`, que solo descontaba el buffer. Un componente con inventario de sobra en procesos intermedios reportaba piezas por fabricar mientras su badge decía "Cubierto" (caso real: `92691823-A` con 249 pzs en piso mostraba "57 por fabricar" y `req_neto = 0`). El campo ya no existe.
 
 ## Outliers operativos (advertencias)
 
@@ -270,10 +272,10 @@ Validado contra BD real y con el diagrama Excalidraw del usuario. Es el "regress
 - `90358715-RA` card: `wipBuffer = 0` (las 4 piezas están en Doblez, no en el buffer)
 - `91711040-RA` card: `wipBuffer = 9`
 
-**Card del componente** (modo Requerimiento):
+**Card del componente** (modo Requerimiento) — muestra `req_neto`, que descuenta **todo** el WIP del componente:
 
-- `90358715-RA` card: `reqBufferFaltante = 222 - 0 = 222`
-- `91711040-RA` card: `reqBufferFaltante = 222 - 9 = 213`
+- `90358715-RA` card: `req_neto = max(0, 222 - 4) = 218` (las 4 pzs de Doblez cuentan aunque no estén en el buffer)
+- `91711040-RA` card: `req_neto = max(0, 222 - 9) = 213`
 
 Este caso está cubierto explícitamente por:
 

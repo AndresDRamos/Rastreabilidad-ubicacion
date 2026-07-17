@@ -53,9 +53,11 @@ type Props = NodeProps<Node<ComponentNodeData>>;
 export function ComponentNode({ data }: Props) {
   const mode = useUiStore((s) => s.mode);
   // Card del intermedio:
-  //   inventario   -> piezas listas en el buffer Almacen WIP (wipBuffer)
-  //   requerimiento -> piezas que aun faltan para cubrir al padre (reqBufferFaltante)
-  const valor = mode === "inventario" ? data.wipBuffer : data.reqBufferFaltante;
+  //   inventario    -> piezas listas en el buffer Almacen WIP (wipBuffer)
+  //   requerimiento -> req_neto: lo que realmente falta fabricar de este
+  //     componente para el arbol abierto, descontando TODO su WIP (en cualquier
+  //     proceso), no solo el del buffer.
+  const valor = mode === "inventario" ? data.wipBuffer : data.reqNeto;
   const subLabel = mode === "inventario" ? "en buffer" : "por fabricar";
 
   const ring = STATUS_RING[data.status];

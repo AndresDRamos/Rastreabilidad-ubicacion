@@ -87,7 +87,7 @@ Las dos vistas se cruzan:
 | `components/Canvas/EmptyState.tsx` | Placeholder cuando no hay PT activo (uso limitado ahora que el default es Resumen). |
 | `components/Canvas/ArbolCanvas.tsx` | Hook query → buildGraph (con `HighlightFiltro` derivado de `procesoFiltro` + `plantaId` + `tipoMaterialIds`) → layout cache → ReactFlow. Auto-expande componentes que matchean el filtro. Panel top-right con botones "Expandir todo" / "Colapsar todo". |
 | `components/Canvas/nodes/PtNode.tsx` | Card 240px, borde azul. Valor según `mode`: `wipTotal` (inv) vs `piezasPend` (req). Thumbnail de la pieza. |
-| `components/Canvas/nodes/ComponentNode.tsx` | Card 240px, borde según status. Valor según `mode`: `wipBuffer` vs `reqBufferFaltante`. Thumbnail. Muestra `×{cantPadre}` si > 1. |
+| `components/Canvas/nodes/ComponentNode.tsx` | Card 240px, borde según status. Valor según `mode`: `wipBuffer` vs `reqNeto`. Thumbnail. Muestra `×{cantPadre}` si > 1 y la leyenda `CompartidoLegend` si el componente vive bajo varios PTs. |
 | `components/Canvas/nodes/ProcessNode.tsx` | Card 220px. Muestra **3 métricas simultáneamente** (Por procesar / Liberadas / En Inspección) — son independientes del toggle Inv/Req. Anillo azul si `highlighted=true`. |
 | `components/Canvas/nodes/PartThumbnail.tsx` | Lazy-load de JPG en `http://192.168.4.5/Dibujos/normal/{clave}.jpg` con placeholder SVG. |
 | `lib/buildGraph.ts` | `buildGraph(arbol, expanded, highlight?) → {nodes, edges}`. Decide qué nodos emitir, qué edges trazar, y marca `highlighted=true` en los process nodes que matchean el `HighlightFiltro`. |

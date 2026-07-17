@@ -57,10 +57,12 @@ Cualquier cambio debe preservar estos números (validados contra BD real y diagr
 - PT `91711066-RA` (Hood W, Rear Engine), CNH Industrial, 222 piezas pendientes, 2 past-due.
 - Componente `90358715-RA` (Angle, Strut) — ruta Corte → Doblez — 4 piezas esperando Doblez.
   - `req_paso[Corte] = 218`, `req_paso[Doblez] = 218`, `req_paso[buffer] = 222`.
-  - `wipBuffer = 0`, `reqBufferFaltante = 222`.
+  - Card: `wipBuffer = 0` (inventario), `req_neto = 218` (requerimiento).
 - Componente `91711040-RA` (Hood, Engine Rear) — ruta Corte → Nivelado → Doblez — 9 piezas en Almacén WIP.
   - `req_paso` en todos los pasos = 213.
-  - `wipBuffer = 9`, `reqBufferFaltante = 213`.
+  - Card: `wipBuffer = 9` (inventario), `req_neto = 213` (requerimiento).
+
+> La card en modo Requerimiento muestra `req_neto` (descuenta todo el WIP). Hasta 2026-07 mostraba `reqBufferFaltante = max(0, req_bruto - wipBuffer)`, que solo descontaba el buffer y contradecía al badge "Cubierto".
 
 Cubierto por `test_req_paso_caso_diagrama_usuario` (datos sintéticos) y `test_arbol_pt_canonico_cuadra_con_diagrama` (e2e, requiere `RBOM_E2E_PT_ID`).
 

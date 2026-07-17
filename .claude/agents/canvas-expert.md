@@ -42,7 +42,7 @@ Y los archivos a tocar según la tarea (típicamente `buildGraph.ts`, `ArbolCanv
 
 5. **Cast `as unknown as Node[]` en `ArbolCanvas`** es intencional. React Flow 12 con `useNodesState<Node>` no acepta uniones de data tipada (`Node<PtNodeData> | Node<ComponentNodeData> | Node<ProcessNodeData>`). Si tratas de "limpiarlo", vas a chocar con el genérico. Déjalo.
 
-6. **Pasos virtuales no se renderizan** como nodos. `buildGraph` filtra `pasosReales = c.ruta.filter(p => !p.es_virtual)` antes de emitir nodos `process`. El valor del paso virtual (Almacen WIP) alimenta `wipBuffer` y `reqBufferFaltante` de la card del componente.
+6. **Pasos virtuales no se renderizan** como nodos. `buildGraph` filtra `pasosReales = c.ruta.filter(p => !p.es_virtual)` antes de emitir nodos `process`. El valor del paso virtual (Almacen WIP) alimenta el `wipBuffer` de la card del componente.
 
 7. **IDs de nodo** siguen convención: `pt-{idPt}`, `c-{idComp}`, `p-{idComp}-{idProceso}`. Usa `cardIdNode` y `procIdNode` de `buildGraph.ts`, no construyas a mano.
 
@@ -51,10 +51,12 @@ Y los archivos a tocar según la tarea (típicamente `buildGraph.ts`, `ArbolCanv
 | Tipo | Componente | Tamaño | Número grande (req) | Número grande (inv) | Status |
 | --- | --- | --- | --- | --- | --- |
 | `pt` | `PtNode` | 240px | `piezasPend` | `wipTotal` | `pt` (azul siempre) |
-| `component` | `ComponentNode` | 240px | `reqBufferFaltante` | `wipBuffer` | covered/partial/empty/neutral |
-| `process` | `ProcessNode` | 180px | `reqPaso` | `wipEnPaso` | covered/partial (visual de borde) |
+| `component` | `ComponentNode` | 240px | `reqNeto` | `wipBuffer` | covered/partial/empty/neutral |
+| `process` | `ProcessNode` | 220px | `reqPaso` | pipeline Disp→Recib→Transf | covered/partial (visual de borde) |
 
-`reqBufferFaltante = max(0, reqBruto - wipBuffer)`. Donde `wipBuffer` viene del PasoRuta virtual del componente.
+`reqNeto = max(0, reqBruto - wipTotal)` viene del backend; descuenta **todo** el WIP del componente, no solo el del buffer. `wipBuffer` viene del PasoRuta virtual y solo se usa en modo Inventario.
+
+> Hasta 2026-07 la card usaba `reqBufferFaltante = max(0, reqBruto - wipBuffer)`, que solo descontaba el buffer: un componente cubierto mostraba piezas por fabricar contradiciendo su propio badge. **No lo reintroduzcas.**
 
 ## Status del componente (derivación)
 

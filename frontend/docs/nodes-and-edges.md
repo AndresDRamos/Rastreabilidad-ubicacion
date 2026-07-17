@@ -34,19 +34,21 @@ Lo que depende del modo:
 
 | Campo | mode = "inventario" | mode = "requerimiento" |
 | --- | --- | --- |
-| Número grande | `wipBuffer` ("en buffer") | `reqBufferFaltante` ("por fabricar") |
+| Número grande | `wipBuffer` ("en buffer") | `reqNeto` ("por fabricar") |
 
 Lo que es independiente del modo:
 
 - **Header**: "Nivel {N}" + chip "procesos" si `expandable` (color según `status`) + badge de status (Cubierto/Parcial/Sin WIP/Sin demanda).
-- **Body**: `PartThumbnail` + `clave`, `descripcion`. Indicador `×{cantPadre}` abajo a la derecha si `cantPadre > 1`.
+- **Body**: `PartThumbnail` + `clave`, `descripcion`. Indicador `×{cantPadre}` abajo a la derecha si `cantPadre > 1`, y `CompartidoLegend` si el componente vive bajo más de un PT.
 - **Borde**: color según `status` (ver tabla abajo).
 
 Donde:
 
 - `wipBuffer = ultimoPasoVirtual.wip_en_paso` (las piezas en el `Almacen WIP` del componente, listas para consumo por el padre).
-- `reqBufferFaltante = max(0, reqBruto - wipBuffer)` (cuántas piezas todavía debo fabricar y poner en el buffer).
+- `reqNeto = max(0, reqBruto - wipTotal)` (cuántas piezas faltan realmente, descontando **todo** el WIP del componente). Debe ser consistente con el badge: `reqNeto = 0` ⇔ "Cubierto".
 - `cantPadre = cantidad_ensamble_total` del componente (suma sobre todas las aristas padre). Antes vivía como label en el edge; se movió a la card para reducir ruido visual cuando el árbol crece.
+
+> **No volver a `reqBufferFaltante = max(0, reqBruto - wipBuffer)`** (el comportamiento hasta 2026-07): solo descontaba el buffer, así que un componente con inventario de sobra en procesos intermedios mostraba piezas por fabricar mientras su badge decía "Cubierto".
 
 ### `ProcessNode` (`frontend/src/components/Canvas/nodes/ProcessNode.tsx`)
 
