@@ -24,10 +24,13 @@ from ..domain.modelo import ArbolPT, NodoComponente
 log = structlog.get_logger("rbom_api.services.export")
 
 
-# Procesos excluidos del calculo de "Total completos": no son etapas de
-# fabricacion del componente.
-#   13 = Embarques      -> el producto ya salio, no es WIP en proceso
-#   16 = Almacen WIP    -> buffer / ARMADO DE KITS, no transforma la pieza
+# Procesos que NO fabrican: no transforman la pieza, solo la retienen.
+#   13 = Embarques      -> el PT ya termino y espera salir
+#   16 = Almacen WIP    -> buffer / ARMADO DE KITS: el intermedio espera al padre
+#
+# Doble rol en "Total completos": al no fabricar quedan fuera de la ruta
+# productiva, y por eso mismo el WIP que espera en ellos es exactamente el que
+# ya termino toda su fabricacion. Ver `_total_completos`.
 PROCESOS_NO_FABRICACION = frozenset({13, 16})
 
 # --- Estilos -----------------------------------------------------------------
@@ -124,21 +127,28 @@ def _total_wip(comp: NodoComponente) -> float:
 
 
 def _total_completos(comp: NodoComponente) -> float:
-    """Piezas que han pasado por TODOS los procesos de fabricacion del componente.
+    """Piezas que ya terminaron TODA la fabricacion del componente.
 
-    Definicion acordada: el **minimo** del WIP a lo largo de los procesos de su
-    ruta, excluyendo Embarques y Almacen WIP / ARMADO DE KITS (que no fabrican).
-    Un cuello de botella en cualquier paso limita cuantas piezas estan completas.
+    Son las que esperan en los procesos que no fabrican: `Almacen WIP` (el
+    buffer donde el intermedio espera a su padre) y `Embarques` (donde el PT
+    espera salir). Llegar ahi implica haber pasado toda la ruta.
 
-    Sin pasos de fabricacion elegibles (ej. un kit cuya unica etapa es el armado)
-    devuelve 0: no hay proceso donde medir avance.
+    La clave esta en la semantica del WIP (trampa #10 del contrato):
+    `wip_en_paso[X]` = piezas esperando **entrar** a X, no piezas que ya
+    pasaron X. Por eso "completas" no es el WIP del ultimo proceso de
+    fabricacion — esas piezas son justo las que aun NO lo han hecho.
+
+    Caso canonico 91711066-RA (verificado contra BD):
+      - 90358715-RA: ruta Corte -> Doblez, 4 pzs esperando Doblez -> 0 completas
+        (les falta Doblez). El WIP del ultimo proceso real diria 4: falso.
+      - 91711040-RA: 9 pzs en Almacen WIP tras Doblez -> 9 completas. El WIP del
+        ultimo proceso real diria 0: falso.
     """
-    elegibles = [
+    return sum(
         p.wip_en_paso
         for p in comp.ruta
-        if not p.es_virtual and p.idProceso not in PROCESOS_NO_FABRICACION
-    ]
-    return min(elegibles) if elegibles else 0.0
+        if p.idProceso in PROCESOS_NO_FABRICACION
+    )
 
 
 def _escribir_hoja(ws: Worksheet, arbol: ArbolPT) -> None:

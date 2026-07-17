@@ -65,32 +65,56 @@ def _arbol(componentes: list[NodoComponente], pt: str = "PT-1") -> ArbolPT:
 
 # ---- Definiciones de negocio ------------------------------------------------
 
-def test_total_completos_es_el_minimo_entre_procesos():
-    """Un cuello de botella en cualquier paso limita las piezas completas."""
-    comp = _comp("C1", [
-        _paso(CORTE, "Corte", 10),
-        _paso(DOBLEZ, "Doblez", 3),
-    ])
-    assert _total_completos(comp) == 3
+def test_total_completos_es_el_wip_post_fabricacion():
+    """Completas = las que esperan en Almacen WIP / Embarques (ya pasaron todo).
 
-
-def test_total_completos_excluye_embarques_y_almacen_wip():
-    """Embarques y Almacen WIP no fabrican: no deben marcar el minimo.
-
-    Sin la exclusion, el 0 de Embarques haria que todo salga en 0.
+    `wip_en_paso[X]` = piezas esperando ENTRAR a X (trampa #10 del contrato).
+    Las 10 de Corte y las 3 de Doblez todavia no completan su ruta; las 7 del
+    buffer si.
     """
     comp = _comp("C1", [
         _paso(CORTE, "Corte", 10),
+        _paso(DOBLEZ, "Doblez", 3),
+        _paso(ALM_WIP, "Almacen WIP", 7, es_virtual=True),
+    ])
+    assert _total_completos(comp) == 7
+
+
+def test_total_completos_no_es_el_wip_del_ultimo_proceso_real():
+    """Regresion del caso canonico 91711066-RA (verificado contra BD real).
+
+    Tomar el WIP del ultimo proceso de fabricacion invierte la realidad:
+      - 90358715-RA: 4 pzs esperando Doblez -> 0 completas (les falta Doblez),
+        pero el ultimo proceso real diria 4.
+      - 91711040-RA: 9 pzs en Almacen WIP  -> 9 completas,
+        pero el ultimo proceso real (Doblez=0) diria 0.
+    """
+    c1 = _comp("90358715-RA", [
+        _paso(CORTE, "Corte", 0),
         _paso(DOBLEZ, "Doblez", 4),
-        _paso(EMBARQUES, "Embarques", 0),
         _paso(ALM_WIP, "Almacen WIP", 0, es_virtual=True),
     ])
-    assert _total_completos(comp) == 4
+    c2 = _comp("91711040-RA", [
+        _paso(CORTE, "Corte", 0),
+        _paso(DOBLEZ, "Doblez", 0),
+        _paso(ALM_WIP, "Almacen WIP", 9, es_virtual=True),
+    ])
+    assert _total_completos(c1) == 0, "las 4 de Doblez aun no completan la ruta"
+    assert _total_completos(c2) == 9, "las 9 del buffer si terminaron"
 
 
-def test_total_completos_sin_pasos_de_fabricacion_es_cero():
-    """Un kit cuya unica etapa es el armado no tiene donde medir avance."""
-    comp = _comp("KIT", [_paso(ALM_WIP, "Almacen WIP", 50, es_virtual=True)])
+def test_total_completos_cuenta_embarques_para_el_pt():
+    """El PT no tiene buffer virtual: sus completas esperan en Embarques."""
+    pt = _comp("PT-1", [
+        _paso(CORTE, "Corte", 5),
+        _paso(EMBARQUES, "Embarques", 12),
+    ], tipo_material=1)
+    assert _total_completos(pt) == 12
+
+
+def test_total_completos_sin_procesos_de_retencion_es_cero():
+    """Sin Almacen WIP ni Embarques no hay donde medir lo terminado."""
+    comp = _comp("C1", [_paso(CORTE, "Corte", 50)])
     assert _total_completos(comp) == 0
 
 
