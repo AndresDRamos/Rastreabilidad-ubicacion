@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 
 import { useOrdenDetalle, useRequerimientoCalendario } from "@/api/queries";
 import type { CalGranularidad, CeldaCalendario } from "@/api/types";
@@ -133,6 +134,22 @@ function blendOnWhite([r, g, b]: RGB, a: number): string {
 const HATCH =
   "repeating-linear-gradient(45deg, rgba(255,255,255,0.5) 0 3px, transparent 3px 6px)";
 
+// Contorno de la columna "hoy" (dia/semana/mes actual): un solo rectangulo
+// alrededor de TODA la columna, no una caja por celda. Se arma con
+// border-left/right en cada celda (se alinean entre filas porque el ancho de
+// columna es fijo) + border-top solo en la cabecera + border-bottom solo en
+// el footer, cerrando el rectangulo arriba y abajo.
+const HOY_COLOR = "#3b82f6";
+function hoyColStyle(isHoy: boolean, edge: "top" | "middle" | "bottom"): CSSProperties {
+  if (!isHoy) return {};
+  return {
+    borderLeft: `2px solid ${HOY_COLOR}`,
+    borderRight: `2px solid ${HOY_COLOR}`,
+    borderTop: edge === "top" ? `2px solid ${HOY_COLOR}` : undefined,
+    borderBottom: edge === "bottom" ? `2px solid ${HOY_COLOR}` : undefined,
+  };
+}
+
 // ---- Modelo derivado -------------------------------------------------------
 
 interface FilaCal {
@@ -176,6 +193,28 @@ export function CalendarioPanel() {
 
   const hoy = useMemo(() => hoyLocal(), []);
 
+  // Ancho disponible para las columnas de tiempo (medido con ResizeObserver;
+  // se usa para calcular cuantas columnas COMPLETAS entran, sin cortar una a
+  // la mitad, y para desplazarlas por botones en lugar de scroll horizontal).
+  // Callback-ref (en vez de useRef + effect con deps []) porque el contenedor
+  // solo existe cuando `filas.length > 0` — con deps [] el effect corre en el
+  // primer commit (el skeleton, sin el nodo) y el observer nunca se adjunta.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const scrollRef = useCallback((node: HTMLDivElement | null) => setScrollEl(node), []);
+  const [availWidth, setAvailWidth] = useState(0);
+  useEffect(() => {
+    if (!scrollEl) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? scrollEl.clientWidth;
+      setAvailWidth(w);
+    });
+    ro.observe(scrollEl);
+    setAvailWidth(scrollEl.clientWidth);
+    return () => ro.disconnect();
+  }, [scrollEl]);
+
+  const [offset, setOffset] = useState(0);
+
   // Filtrado client-side (mismo patron que el listado): pt/cliente/ciudad y forecast.
   const filtradas = useMemo<CeldaCalendario[]>(() => {
     if (!celdas) return [];
@@ -211,6 +250,30 @@ export function CalendarioPanel() {
     }
     return cols;
   }, [filtradas, gran, hoy]);
+
+  // Bucket que contiene "hoy" — por construccion es siempre columnas[0] (la
+  // ventana de columnas arranca en bucketStart(hoy, gran)), asi que "estar en
+  // columnas[0]" <=> offset === 0.
+  const hoyKey = useMemo(() => bucketKey(bucketStart(hoy, gran)), [hoy, gran]);
+
+  // Cuantas columnas COMPLETAS entran en el ancho disponible, y su ancho
+  // efectivo (se estiran para llenar el espacio, sin dejar una columna cortada).
+  const minColW = bucketWidth(gran);
+  const usableWidth = Math.max(0, availWidth - COL1_W - COL2_W);
+  const visibleCount = Math.max(1, Math.min(columnas.length || 1, Math.floor(usableWidth / minColW) || 1));
+  const colW = usableWidth > 0 ? Math.max(minColW, usableWidth / visibleCount) : minColW;
+  const maxOffset = Math.max(0, columnas.length - visibleCount);
+
+  // El offset se acota cuando cambian los datos/ancho/granularidad (evita
+  // quedar "fuera de rango" tras un resize o un cambio de filtro).
+  useEffect(() => {
+    setOffset((o) => Math.min(o, maxOffset));
+  }, [maxOffset]);
+
+  const columnasVisibles = useMemo(
+    () => columnas.slice(offset, offset + visibleCount),
+    [columnas, offset, visibleCount],
+  );
 
   // Agrupacion por (PT x cliente x ciudad).
   const filas = useMemo<FilaCal[]>(() => {
@@ -282,9 +345,18 @@ export function CalendarioPanel() {
     <div className="flex-1 min-h-0 flex flex-col">
       <Controls
         gran={gran}
-        setGran={setGran}
+        setGran={(g) => {
+          setOffset(0);
+          setGran(g);
+        }}
         incluyeForecast={incluyeForecast}
         setIncluyeForecast={setIncluyeForecast}
+        onPrev={() => setOffset((o) => Math.max(0, o - 1))}
+        onNext={() => setOffset((o) => Math.min(maxOffset, o + 1))}
+        onHoy={() => setOffset(0)}
+        canPrev={offset > 0}
+        canNext={offset < maxOffset}
+        enViewHoy={offset === 0}
       />
 
       {isLoading ? (
@@ -298,19 +370,19 @@ export function CalendarioPanel() {
           Sin demanda con los filtros actuales.
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           <table
             className="border-separate border-spacing-0 text-xs"
             style={{
               tableLayout: "fixed",
-              width: COL1_W + COL2_W + columnas.length * bucketWidth(gran),
+              width: availWidth > 0 ? "100%" : COL1_W + COL2_W + columnasVisibles.length * colW,
             }}
           >
             <colgroup>
               <col style={{ width: COL1_W }} />
               <col style={{ width: COL2_W }} />
-              {columnas.map((col) => (
-                <col key={col.key} style={{ width: bucketWidth(gran) }} />
+              {columnasVisibles.map((col) => (
+                <col key={col.key} style={{ width: colW }} />
               ))}
             </colgroup>
             <thead>
@@ -332,11 +404,15 @@ export function CalendarioPanel() {
                 >
                   Past-due
                 </th>
-                {columnas.map((col) => (
+                {columnasVisibles.map((col) => (
                   <th
                     key={col.key}
                     className="sticky top-0 z-20 bg-surface-muted text-center px-1 py-1.5 font-medium text-ink-muted border-b border-surface-border"
-                    style={{ width: bucketWidth(gran), minWidth: bucketWidth(gran) }}
+                    style={{
+                      width: colW,
+                      minWidth: colW,
+                      ...hoyColStyle(col.key === hoyKey, "top"),
+                    }}
                   >
                     <div className="leading-tight whitespace-nowrap">{col.label.top}</div>
                     {col.label.sub ? (
@@ -353,7 +429,9 @@ export function CalendarioPanel() {
                 <FilaMatriz
                   key={fila.key}
                   fila={fila}
-                  columnas={columnas}
+                  columnas={columnasVisibles}
+                  colW={colW}
+                  hoyKey={hoyKey}
                   maxVal={maxVal}
                   hoy={hoy}
                   gran={gran}
@@ -392,13 +470,17 @@ export function CalendarioPanel() {
                 >
                   {totales.pastDue > 0 ? fmtInt(totales.pastDue) : "—"}
                 </td>
-                {columnas.map((col) => {
+                {columnasVisibles.map((col) => {
                   const v = totales.porBucket.get(col.key) ?? 0;
                   return (
                     <td
                       key={col.key}
                       className="sticky bottom-0 z-10 bg-surface-subtle text-center px-1 py-1.5 font-semibold tabular-nums text-ink border-t border-surface-border"
-                      style={{ width: bucketWidth(gran), minWidth: bucketWidth(gran) }}
+                      style={{
+                        width: colW,
+                        minWidth: colW,
+                        ...hoyColStyle(col.key === hoyKey, "bottom"),
+                      }}
                     >
                       {v > 0 ? fmtInt(v) : "—"}
                     </td>
@@ -426,11 +508,24 @@ function Controls({
   setGran,
   incluyeForecast,
   setIncluyeForecast,
+  onPrev,
+  onNext,
+  onHoy,
+  canPrev,
+  canNext,
+  enViewHoy,
 }: {
   gran: CalGranularidad;
   setGran: (g: CalGranularidad) => void;
   incluyeForecast: boolean;
   setIncluyeForecast: (v: boolean) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onHoy: () => void;
+  canPrev: boolean;
+  canNext: boolean;
+  // true = la columna "hoy" ya esta visible (offset 0) -> el boton se deshabilita.
+  enViewHoy: boolean;
 }) {
   const opts: { v: CalGranularidad; label: string }[] = [
     { v: "dia", label: "Día" },
@@ -468,6 +563,39 @@ function Controls({
       >
         {incluyeForecast ? "Firme + forecast" : "Solo firme"}
       </button>
+
+      <div className="ml-auto inline-flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={!canPrev}
+          aria-label="Periodo anterior"
+          title="Desplazar hacia atrás"
+          className="w-6 h-6 flex items-center justify-center rounded-md border border-surface-border text-ink-muted hover:bg-surface-subtle disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        >
+          {"◀"}
+        </button>
+        <button
+          type="button"
+          onClick={onHoy}
+          disabled={enViewHoy}
+          aria-label="Ir a hoy"
+          title={enViewHoy ? "La vista actual ya incluye hoy" : "Volver a hoy"}
+          className="px-2 h-6 flex items-center justify-center rounded-md border text-xs font-medium border-surface-border text-ink-muted hover:bg-surface-subtle disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:text-ink-subtle"
+        >
+          Hoy
+        </button>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={!canNext}
+          aria-label="Periodo siguiente"
+          title="Desplazar hacia adelante"
+          className="w-6 h-6 flex items-center justify-center rounded-md border border-surface-border text-ink-muted hover:bg-surface-subtle disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        >
+          {"▶"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -477,6 +605,8 @@ function Controls({
 function FilaMatriz({
   fila,
   columnas,
+  colW,
+  hoyKey,
   maxVal,
   hoy,
   gran,
@@ -485,6 +615,8 @@ function FilaMatriz({
 }: {
   fila: FilaCal;
   columnas: { key: string; start: Date; nextExcl: Date; label: { top: string; sub: string } }[];
+  colW: number;
+  hoyKey: string;
   maxVal: number;
   hoy: Date;
   gran: CalGranularidad;
@@ -557,14 +689,15 @@ function FilaMatriz({
             key={col.key}
             className="text-center tabular-nums border-b border-surface-border"
             style={{
-              width: bucketWidth(gran),
-              minWidth: bucketWidth(gran),
+              width: colW,
+              minWidth: colW,
               backgroundColor: bg,
               backgroundImage: puroForecast ? HATCH : undefined,
               color: total > 0 ? "#1e293b" : "#cbd5e1",
               cursor: total > 0 ? "pointer" : "default",
               outline: sel ? "2px solid #3b82f6" : undefined,
               outlineOffset: sel ? -2 : undefined,
+              ...hoyColStyle(col.key === hoyKey, "middle"),
             }}
             onClick={() => total > 0 && onCell(desde, hasta, etiqueta)}
             title={
