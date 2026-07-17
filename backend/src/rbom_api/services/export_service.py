@@ -24,14 +24,6 @@ from ..domain.modelo import ArbolPT, NodoComponente
 log = structlog.get_logger("rbom_api.services.export")
 
 
-# Procesos que NO fabrican: no transforman la pieza, solo la retienen.
-#   13 = Embarques      -> el PT ya termino y espera salir
-#   16 = Almacen WIP    -> buffer / ARMADO DE KITS: el intermedio espera al padre
-#
-# Doble rol en "Total completos": al no fabricar quedan fuera de la ruta
-# productiva, y por eso mismo el WIP que espera en ellos es exactamente el que
-# ya termino toda su fabricacion. Ver `_total_completos`.
-PROCESOS_NO_FABRICACION = frozenset({13, 16})
 
 # --- Estilos -----------------------------------------------------------------
 _AZUL = "3B82F6"
@@ -129,26 +121,33 @@ def _total_wip(comp: NodoComponente) -> float:
 def _total_completos(comp: NodoComponente) -> float:
     """Piezas que ya terminaron TODA la fabricacion del componente.
 
-    Son las que esperan en los procesos que no fabrican: `Almacen WIP` (el
-    buffer donde el intermedio espera a su padre) y `Embarques` (donde el PT
-    espera salir). Llegar ahi implica haber pasado toda la ruta.
+    Es el WIP del **ultimo paso de su ruta**. Sale de la estructura, no de una
+    lista de idProceso: cada componente termina donde termina su propia ruta.
 
-    La clave esta en la semantica del WIP (trampa #10 del contrato):
-    `wip_en_paso[X]` = piezas esperando **entrar** a X, no piezas que ya
-    pasaron X. Por eso "completas" no es el WIP del ultimo proceso de
-    fabricacion — esas piezas son justo las que aun NO lo han hecho.
+    Por que el ultimo paso es exactamente "lo terminado": `wip_en_paso[X]` son
+    las piezas esperando **entrar** a X (trampa #10), es decir las que ya
+    completaron todos los pasos anteriores. En el ultimo paso, "todos los
+    anteriores" es toda la fabricacion.
 
-    Caso canonico 91711066-RA (verificado contra BD):
-      - 90358715-RA: ruta Corte -> Doblez, 4 pzs esperando Doblez -> 0 completas
-        (les falta Doblez). El WIP del ultimo proceso real diria 4: falso.
-      - 91711040-RA: 9 pzs en Almacen WIP tras Doblez -> 9 completas. El WIP del
-        ultimo proceso real diria 0: falso.
+      - Intermedios: el netteo siempre cierra la ruta con el buffer virtual
+        `Almacen WIP`, asi que ahi esperan las que ya recorrieron su ruta —
+        sin importar en que proceso real acabe (no todos acaban igual).
+      - PT raiz: no lleva buffer virtual; su ultimo paso catalogado (tipicamente
+        Embarques) cumple el mismo rol.
+
+    Dos lecturas que esto descarta:
+
+    1. **El WIP del ultimo proceso de FABRICACION**: son justo las piezas a las
+       que les falta ese proceso. Caso canonico: `90358715-RA` tiene 4 pzs
+       esperando Doblez -> 0 completas, y `91711040-RA` tiene 9 en el buffer ->
+       9 completas. Esa lectura daria 4 y 0: invertido.
+    2. **Sumar por idProceso 13/16**: `idProceso=16` no siempre es el buffer
+       final — en los PT que arrancan con ARMADO DE KITS es el **primer** paso
+       real, y contarlo daria por terminado el material que espera al inicio.
     """
-    return sum(
-        p.wip_en_paso
-        for p in comp.ruta
-        if p.idProceso in PROCESOS_NO_FABRICACION
-    )
+    if not comp.ruta:
+        return 0.0
+    return comp.ruta[-1].wip_en_paso
 
 
 def _escribir_hoja(ws: Worksheet, arbol: ArbolPT) -> None:

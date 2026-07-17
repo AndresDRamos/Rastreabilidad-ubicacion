@@ -65,8 +65,8 @@ def _arbol(componentes: list[NodoComponente], pt: str = "PT-1") -> ArbolPT:
 
 # ---- Definiciones de negocio ------------------------------------------------
 
-def test_total_completos_es_el_wip_post_fabricacion():
-    """Completas = las que esperan en Almacen WIP / Embarques (ya pasaron todo).
+def test_total_completos_es_el_wip_del_ultimo_paso_de_la_ruta():
+    """Completas = las que esperan en el ultimo paso (ya pasaron todo lo previo).
 
     `wip_en_paso[X]` = piezas esperando ENTRAR a X (trampa #10 del contrato).
     Las 10 de Corte y las 3 de Doblez todavia no completan su ruta; las 7 del
@@ -103,8 +103,9 @@ def test_total_completos_no_es_el_wip_del_ultimo_proceso_real():
     assert _total_completos(c2) == 9, "las 9 del buffer si terminaron"
 
 
-def test_total_completos_cuenta_embarques_para_el_pt():
-    """El PT no tiene buffer virtual: sus completas esperan en Embarques."""
+def test_total_completos_cuenta_el_ultimo_paso_para_el_pt():
+    """El PT no tiene buffer virtual: sus completas esperan en su ultimo paso
+    catalogado (tipicamente Embarques)."""
     pt = _comp("PT-1", [
         _paso(CORTE, "Corte", 5),
         _paso(EMBARQUES, "Embarques", 12),
@@ -112,9 +113,38 @@ def test_total_completos_cuenta_embarques_para_el_pt():
     assert _total_completos(pt) == 12
 
 
-def test_total_completos_sin_procesos_de_retencion_es_cero():
-    """Sin Almacen WIP ni Embarques no hay donde medir lo terminado."""
-    comp = _comp("C1", [_paso(CORTE, "Corte", 50)])
+def test_total_completos_ultimo_paso_aunque_no_sea_embarques_ni_almacen():
+    """No todos los componentes terminan en Embarques/Almacen WIP.
+
+    Uno que acaba en Dock Audit (id ficticio 40) debe reportar el WIP de ese
+    ultimo paso — una lista fija {13,16} lo dejaria en 0.
+    """
+    DOCK_AUDIT = 40
+    comp = _comp("C1", [
+        _paso(CORTE, "Corte", 5),
+        _paso(DOCK_AUDIT, "Dock Audit", 8),
+    ])
+    assert _total_completos(comp) == 8
+
+
+def test_total_completos_no_confunde_armado_de_kits_inicial():
+    """idProceso=16 al INICIO (PT con ARMADO DE KITS) no es "terminado".
+
+    Sumar por id {13,16} contaria las 30 piezas que esperan ENTRAR al armado
+    como si estuvieran completas. Lo correcto es el ultimo paso (Embarques=2).
+    """
+    SOLDADURA = 6
+    pt = _comp("KIT-PT", [
+        _paso(ALM_WIP, "Armado de kits", 30),   # primer paso REAL, no virtual
+        _paso(SOLDADURA, "Soldadura", 4),
+        _paso(EMBARQUES, "Embarques", 2),
+    ], tipo_material=1)
+    assert _total_completos(pt) == 2
+
+
+def test_total_completos_sin_ruta_es_cero():
+    """Sin ruta no hay donde medir lo terminado."""
+    comp = _comp("C1", [])
     assert _total_completos(comp) == 0
 
 
