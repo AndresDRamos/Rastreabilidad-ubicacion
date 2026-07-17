@@ -70,16 +70,17 @@ Las dos vistas se cruzan:
 | `App.tsx` | Layout: Sidebar + main. En main: Tabs + (si `view==="tree"`) ModeToggle + (Canvas o SummaryView). |
 | `index.css` | Tailwind directives + scrollbars custom. |
 | `vite-env.d.ts` | Tipos vite. |
-| `api/types.ts` | Tipos espejo de los modelos pydantic del backend: `FilaListado`, `DemandaPT`, `PasoRuta`, `AristaPadre`, `NodoComponente`, `ArbolPT`, `BloqueProceso`, `PTEnProceso`, `Planta`, `Mode`. |
+| `api/types.ts` | Tipos espejo de los modelos pydantic del backend: `FilaListado`, `DemandaPT`, `PasoRuta`, `AristaPadre`, `NodoComponente`, `ArbolPT`, `BloqueProceso`, `PTEnProceso`, `Planta`, `CeldaCalendario`, `OrdenLinea`, `Mode`. Más los tipos propios `CalGranularidad` y `CalModo` de la vista Calendario (sin equivalente pydantic). |
 | `api/client.ts` | Axios instance con `baseURL = "/api"` (queries usan rutas tipo `/pts`, `/bloques`, etc., y Vite/uvicorn las resuelven). |
-| `api/queries.ts` | Hooks TanStack: `usePts`, `useArbol`, `useBloques`, `usePtsEnProceso`, `usePlantas`. Cada uno con su `staleTime` apropiado (ver `conventions.md`). |
-| `store/useUiStore.ts` | Zustand store. Única fuente de verdad de UI — incluye `view`, `filters` (cliente/ciudades/pt/fechaMax/planta/tiposMaterial/clases), tabs, modo, expanded, `procesoFiltro`. |
-| `components/Sidebar/Sidebar.tsx` | Header + FiltersHeader + PtTable. Colapsable (`w-[360px]` ↔ `w-8`). |
+| `api/queries.ts` | Hooks TanStack: `usePts`, `useArbol`, `useBloques`, `usePtsEnProceso`, `usePlantas`, `useRequerimientoCalendario`, `useOrdenDetalle` (entre otros). Cada uno con su `staleTime` apropiado (ver `conventions.md`). |
+| `store/useUiStore.ts` | Zustand store. Única fuente de verdad de UI — incluye `view`, `filters` (cliente/ciudades/pt/fechaMax/planta/tiposMaterial/clases), tabs, modo, expanded, `procesoFiltro`, y el panel Calendario (`sidebarExpanded`, `calGranularidad`, `calIncluyeForecast`, `calModo`, `celdaDetalle`). |
+| `components/Sidebar/Sidebar.tsx` | Header + FiltersHeader + (PtTable ó CalendarioPanel según `sidebarExpanded`). Colapsable (`w-[360px]` ↔ `w-8`) y expandible a `w-[min(920px,92vw)]` para el calendario (tercer estado de ancho). |
 | `components/Sidebar/FiltersHeader.tsx` | `ClienteCombobox` + `CiudadMultiSelect` + `ClaseMultiSelect` + input texto PT + input date `fechaMax`. |
 | `components/Sidebar/ClienteCombobox.tsx` | Combobox que deriva sus opciones de `usePts` (clientes que aparecen en el listado). Almacena `clienteId: number | null`. |
 | `components/Sidebar/CiudadMultiSelect.tsx` | Multi-select de ciudades; si hay `clienteId`, restringe a las ciudades de ese cliente. |
 | `components/Sidebar/ClaseMultiSelect.tsx` | Multi-select de Clase NetSuit (catálogo global del item). Quita auto-clases huérfanas si cambia el universo. |
 | `components/Sidebar/PtTable.tsx` | Lee `usePts(ventana, fechaMax)`, filtra client-side, **pagina (25/pp)**. Cuando hay `procesoFiltro`, llama `usePtsEnProceso(...)`, intersecta el listado y lo ordena por piezasEnProceso descendente, con badge "N en {proceso}" en cada row. |
+| `components/Sidebar/CalendarioPanel.tsx` | Vista Calendario de requerimiento (corte 1). Lee `useRequerimientoCalendario(ventana, fechaMax, universo)`, filtra client-side (pt/cliente/ciudad/forecast, mismo patrón que `PtTable`) y agrupa por (PT × Cliente × Ciudad). Bucketiza `Fecha` a día/semana/mes (`calGranularidad`) **en el navegador**, sin re-fetch. Matriz: columna identidad fija + columna Past-due fija + N columnas de bucket con heatmap (cercano cálido → lejano frío; forecast hachurado) + fila Total. Clic en celda → `setCeldaDetalle(...)` → popover inferior con `useOrdenDetalle(...)`. |
 | `components/Tabs.tsx` | Pestaña fija "Resumen" + un tab por cada `selectedPtIds`. Click tab → `setActiveTab` (o `showSummary`). X → `closeTab` + `dropCachedLayoutByPt`. |
 | `components/ModeToggle.tsx` | Botones "Requerimiento" / "Inventario" → `setMode`. Solo visible cuando `view==="tree"`. |
 | `components/Summary/SummaryView.tsx` | Vista Resumen: header con totales + `PlantaSelect` + `TipoMaterialSelect` + chips de filtros activos. Grid de bloques (ProcessBlock) cliclables que setean `procesoFiltro`. |
@@ -87,7 +88,7 @@ Las dos vistas se cruzan:
 | `components/Canvas/EmptyState.tsx` | Placeholder cuando no hay PT activo (uso limitado ahora que el default es Resumen). |
 | `components/Canvas/ArbolCanvas.tsx` | Hook query → buildGraph (con `HighlightFiltro` derivado de `procesoFiltro` + `plantaId` + `tipoMaterialIds`) → layout cache → ReactFlow. Auto-expande componentes que matchean el filtro. Panel top-right con botones "Expandir todo" / "Colapsar todo". |
 | `components/Canvas/nodes/PtNode.tsx` | Card 240px, borde azul. Valor según `mode`: `wipTotal` (inv) vs `piezasPend` (req). Thumbnail de la pieza. |
-| `components/Canvas/nodes/ComponentNode.tsx` | Card 240px, borde según status. Valor según `mode`: `wipBuffer` vs `reqBufferFaltante`. Thumbnail. Muestra `×{cantPadre}` si > 1. |
+| `components/Canvas/nodes/ComponentNode.tsx` | Card 240px, borde según status. Valor según `mode`: `wipTotal` ("en piso") vs `reqNeto` ("por fabricar"). Thumbnail. Muestra `×{cantPadre}` si > 1 y la leyenda `CompartidoLegend` si el componente vive bajo varios PTs. |
 | `components/Canvas/nodes/ProcessNode.tsx` | Card 220px. Muestra **3 métricas simultáneamente** (Por procesar / Liberadas / En Inspección) — son independientes del toggle Inv/Req. Anillo azul si `highlighted=true`. |
 | `components/Canvas/nodes/PartThumbnail.tsx` | Lazy-load de JPG en `http://192.168.4.5/Dibujos/normal/{clave}.jpg` con placeholder SVG. |
 | `lib/buildGraph.ts` | `buildGraph(arbol, expanded, highlight?) → {nodes, edges}`. Decide qué nodos emitir, qué edges trazar, y marca `highlighted=true` en los process nodes que matchean el `HighlightFiltro`. |
@@ -148,6 +149,7 @@ interface UiState {
   - Sidebar: `clienteId`, `ciudadIds`, `pt` filtran client-side la tabla. `fechaMax` se manda a `/api/pts` y `/api/pts/{id}/arbol`.
   - Árbol: `plantaId` + `tipoMaterialIds` se combinan con `procesoFiltro` para armar el `HighlightFiltro`.
 - **`procesoFiltro` se setea solo desde el bloque del Resumen**. Las chips del header del Resumen permiten removerlo. Cerrar el tab activo NO lo limpia (intencional: si cambias de PT mantienes el filtro).
+- **Panel Calendario** (`sidebarExpanded`, `calGranularidad`, `calIncluyeForecast`, `calModo`, `celdaDetalle`): `sidebarExpanded` es un tercer estado de ancho del sidebar (no confundir con el `collapsed` local de `Sidebar.tsx`, que es puramente visual y no vive en el store). `toggleSidebarExpanded` cierra `celdaDetalle` al colapsar. `setCalGranularidad`/`setCalIncluyeForecast` también limpian `celdaDetalle` porque cambiar el bucket invalida los límites `desde/hasta` de la celda seleccionada. `calModo` hoy solo tiene efecto `"requerimiento"`; `"embarques"`/`"ambos"` quedan reservados para la fase 2 (historial de embarques) sin rehacer la firma del store.
 
 ## `api/types.ts` — invariante con el backend
 
@@ -164,10 +166,12 @@ El archivo refleja 1:1 los modelos pydantic de `backend/src/rbom_api/domain/mode
 | `BloqueProceso` | `BloqueProceso` |
 | `PTEnProceso` | `PTEnProceso` |
 | `Planta` | `Planta` |
+| `CeldaCalendario` (result-set de `Q_requerimiento_calendario.sql`) | `CeldaCalendario` |
+| `OrdenLinea` (result-set de `Q_orden_detalle.sql`) | `OrdenLinea` |
 
 **Invariante**: si cambias un campo en el backend, debes replicarlo aquí. No hay generador automático. Si tienes muchos cambios pendientes considera generar tipos desde el `openapi.json` (FastAPI lo expone en `/openapi.json`) con `openapi-typescript`.
 
-`Mode = "inventario" | "requerimiento"` y los `Data` de cada nodo (`PtNodeData`, `ComponentNodeData`, `ProcessNodeData` en `lib/buildGraph.ts`) son propios del frontend, no existen en el backend.
+`Mode = "inventario" | "requerimiento"` y los `Data` de cada nodo (`PtNodeData`, `ComponentNodeData`, `ProcessNodeData` en `lib/buildGraph.ts`) son propios del frontend, no existen en el backend. Igual `CalGranularidad = "dia" | "semana" | "mes"` y `CalModo = "requerimiento" | "embarques" | "ambos"` (panel Calendario) — sin equivalente pydantic, viven solo en `api/types.ts`.
 
 ## Estilos (`tailwind.config.ts`)
 
@@ -184,6 +188,8 @@ Paleta semántica, no por color:
 | `status-neutral` | Gris: sin demanda. |
 
 Si necesitas un color nuevo, agrégalo al `tailwind.config.ts` con nombre semántico (`status-warning`, no `yellow-500`).
+
+Animación custom: `animate-popover-in` (keyframes `popover-in`, 140ms ease-out — fade + scale/translateY sutil) para paneles flotantes tipo popover que se montan/desmontan condicionalmente (ej. `Sidebar/FiltersHeader.tsx`). Úsala en vez de definir un `transition` ad-hoc cuando el patrón sea "aparece por encima del layout, anclado a un botón".
 
 ## Vista Resumen — detalle estructural
 

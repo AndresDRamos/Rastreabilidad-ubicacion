@@ -34,7 +34,7 @@ Estas reglas viven en `algoritmo-netteo.md`. Si un cambio las rompe, es RECHAZO 
 
 1. **Agrupación por `idProceso`** — si una ruta tiene varios sub-pasos con el mismo idProceso (caso real: Soldadura Robot + Limpieza + Manual, todos idProceso=6), se colapsan en UN solo `PasoRuta`. El WIP se cuenta UNA vez, no por sub-paso. Implementado en `_construir_pasos`. Verificable con `test_agrupacion_pasos_por_idProceso`.
 
-2. **Buffer virtual `Almacen WIP` (idProceso=16)** — se agrega al final SOLO para intermedios (no para el PT raíz). Tiene `es_virtual=True`. NO se renderiza como nodo, pero alimenta `wipBuffer` y `reqBufferFaltante` de la card del componente. Verificable con `test_pt_no_tiene_nodo_virtual`.
+2. **Buffer virtual `Almacen WIP` (idProceso=16)** — se agrega al final SOLO para intermedios (no para el PT raíz). Tiene `es_virtual=True`. NO se renderiza como nodo; su `wip_en_paso` entra en `wip_total` (pasada 1) y en el acumulado downstream de `req_paso` (pasada 2), así que borrarlo cambia los números. Verificable con `test_pt_no_tiene_nodo_virtual`.
 
 3. **Componentes shared** — un `idComp` que aparece bajo varios padres en el BOM:
    - `req_bruto` SUMA todas las contribuciones de los padres.
@@ -57,10 +57,12 @@ Cualquier cambio debe preservar estos números (validados contra BD real y diagr
 - PT `91711066-RA` (Hood W, Rear Engine), CNH Industrial, 222 piezas pendientes, 2 past-due.
 - Componente `90358715-RA` (Angle, Strut) — ruta Corte → Doblez — 4 piezas esperando Doblez.
   - `req_paso[Corte] = 218`, `req_paso[Doblez] = 218`, `req_paso[buffer] = 222`.
-  - `wipBuffer = 0`, `reqBufferFaltante = 222`.
+  - Card: `wip_total = 4` (inventario), `req_neto = 218` (requerimiento).
 - Componente `91711040-RA` (Hood, Engine Rear) — ruta Corte → Nivelado → Doblez — 9 piezas en Almacén WIP.
   - `req_paso` en todos los pasos = 213.
-  - `wipBuffer = 9`, `reqBufferFaltante = 213`.
+  - Card: `wip_total = 9` (inventario), `req_neto = 213` (requerimiento).
+
+> La card muestra `wip_total` (Inventario) y `req_neto` (Requerimiento). Hasta 2026-07 usaba `wipBuffer` / `reqBufferFaltante = max(0, req_bruto - wipBuffer)`, que solo miraban el buffer y contradecían al badge "Cubierto".
 
 Cubierto por `test_req_paso_caso_diagrama_usuario` (datos sintéticos) y `test_arbol_pt_canonico_cuadra_con_diagrama` (e2e, requiere `RBOM_E2E_PT_ID`).
 

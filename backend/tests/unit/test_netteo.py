@@ -1,10 +1,22 @@
 """Tests del algoritmo de netteo con casos sinteticos.
 
+IMPORTANTE — semantica de CantidadEnsamble
+------------------------------------------
+`tblBomExplosionado.CantidadEnsamble` viene **acumulada desde el PT raiz** (ver
+`_cantidad_local` en netteo.py y la seccion correspondiente de
+backend/docs/algoritmo-netteo.md). Los fixtures de este archivo deben expresarla
+igual que EPS, o codifican una semantica que no existe:
+
+    CantidadEnsamble(fila) = cantidad_local * CantidadEnsamble(fila del padre)
+
+Ej.: si Cb lleva 2 por PT y Ca lleva 2 por cada Cb, la fila de Ca va con 4
+(= 2 local x 2 de Cb), no con 2.
+
 Caso canonico del usuario: Ca, Cc -> Cb -> Cp
 - Cp requiere 1 pieza (demanda)
-- Cb es hijo directo de Cp con CantEnsamble=2
-- Ca es hijo de Cb con CantEnsamble=2
-- Cc es hijo de Cb con CantEnsamble=2
+- Cb es hijo directo de Cp, lleva 2 por PT       -> CantEnsamble=2 (2 local x 1)
+- Ca es hijo de Cb, lleva 2 por cada Cb          -> CantEnsamble=4 (2 local x 2)
+- Cc es hijo de Cb, lleva 2 por cada Cb          -> CantEnsamble=4 (2 local x 2)
 
 WIP:
 - Cb: 1 pza en Almacen WIP (=ya armado, esperando Cp)
@@ -57,11 +69,12 @@ def _bom() -> list[FilaBom]:
         FilaBom(IdBom=2, IdBomParent=1, BomLevel=2, idComp=CB, Componente="Cb",
                 IdPadre=CP, idTipoMat=3, CantidadEnsamble=2, HijosTotales=2,
                 bLastLevel=False),
+        # CantEnsamble=4 = 2 local x 2 acumulado de Cb (semantica de EPS)
         FilaBom(IdBom=3, IdBomParent=2, BomLevel=3, idComp=CA, Componente="Ca",
-                IdPadre=CB, idTipoMat=3, CantidadEnsamble=2, HijosTotales=0,
+                IdPadre=CB, idTipoMat=3, CantidadEnsamble=4, HijosTotales=0,
                 bLastLevel=True),
         FilaBom(IdBom=4, IdBomParent=2, BomLevel=3, idComp=CC, Componente="Cc",
-                IdPadre=CB, idTipoMat=3, CantidadEnsamble=2, HijosTotales=0,
+                IdPadre=CB, idTipoMat=3, CantidadEnsamble=4, HijosTotales=0,
                 bLastLevel=True),
     ]
 
@@ -136,6 +149,110 @@ def test_caso_canonico_req_neto():
     assert nodos[CC].req_bruto == 2
     assert nodos[CC].wip_total == 1
     assert nodos[CC].req_neto == 1
+
+
+def test_cantidad_ensamble_acumulada_se_convierte_a_local():
+    """CantidadEnsamble viene ACUMULADA desde la raiz; el netteo debe usar la LOCAL.
+
+    Replica el caso real del PT 92691818-A (verificado contra BD):
+
+        92691818-A --3--> 92691826-A --1--> 92691827-A --1--> 92691847-A --2--> 92691848-A
+                          (acum 3)          (acum 3)          (acum 3)          (acum 6)
+
+    El factor 3 del primer nivel se propaga a las cantidades acumuladas de todos
+    los descendientes. Si el netteo tratara esas acumuladas como locales,
+    re-aplicaria el 3 en cada nivel y el requerimiento se dispararia
+    (medido en produccion: 918 piezas donde el valor correcto era 0).
+
+    Aqui el WIP de C3 (=92691847-A) cubre su demanda, asi que su hijo C4 no debe
+    requerir nada. Con el bug, C4 pedia cientos de piezas fantasma.
+    """
+    PT, C1, C2, C3, C4 = 900, 901, 902, 903, 904
+
+    demanda = [{
+        "idMaterial": PT, "PT": "92691818-A", "Descripcion": "Test acumulado",
+        "idCliente": 1, "Cliente": "C", "idCiudad": 1, "Ciudad": "City",
+        "PiezasPend": 21, "FechaPromMin": date(2026, 5, 25),
+        "FechaPromMax": date(2026, 5, 25), "PiezasPastDue": 0,
+    }]
+    bom = [
+        FilaBom(IdBom=1, IdBomParent=None, BomLevel=1, idComp=PT, Componente="PT",
+                IdPadre=None, idTipoMat=1, CantidadEnsamble=1, HijosTotales=1,
+                bLastLevel=False),
+        # local 3 -> acum 3
+        FilaBom(IdBom=2, IdBomParent=1, BomLevel=2, idComp=C1, Componente="C1",
+                IdPadre=PT, idTipoMat=3, CantidadEnsamble=3, HijosTotales=1,
+                bLastLevel=False),
+        # local 1 -> acum 3 (1 x 3)
+        FilaBom(IdBom=3, IdBomParent=2, BomLevel=3, idComp=C2, Componente="C2",
+                IdPadre=C1, idTipoMat=3, CantidadEnsamble=3, HijosTotales=1,
+                bLastLevel=False),
+        # local 1 -> acum 3
+        FilaBom(IdBom=4, IdBomParent=3, BomLevel=4, idComp=C3, Componente="C3",
+                IdPadre=C2, idTipoMat=3, CantidadEnsamble=3, HijosTotales=1,
+                bLastLevel=False),
+        # local 2 -> acum 6 (2 x 3)
+        FilaBom(IdBom=5, IdBomParent=4, BomLevel=5, idComp=C4, Componente="C4",
+                IdPadre=C3, idTipoMat=3, CantidadEnsamble=6, HijosTotales=0,
+                bLastLevel=True),
+    ]
+    wip = [
+        FilaWip(idComp=PT, idProceso=SOLDADURA, Proceso="Soldadura", Etiquetas=1, Piezas=2),
+        FilaWip(idComp=C1, idProceso=ALM_WIP_ID, Proceso=ALM_WIP_NOMBRE, Etiquetas=1, Piezas=36),
+        FilaWip(idComp=C3, idProceso=ALM_WIP_ID, Proceso=ALM_WIP_NOMBRE, Etiquetas=1, Piezas=36),
+    ]
+
+    arbol = construir_arbol(
+        demanda_filas=demanda, bom_filas=bom, ruta_filas=[], wip_filas=wip,
+        almacen_wip_id=ALM_WIP_ID, almacen_wip_nombre=ALM_WIP_NOMBRE,
+    )
+    nodos = {n.idComp: n for n in arbol.componentes}
+
+    # PT: 21 - 2 = 19
+    assert nodos[PT].req_neto == 19
+    # C1: local 3 -> 19*3 = 57, wip 36 -> 21
+    assert nodos[C1].req_bruto == 57
+    assert nodos[C1].req_neto == 21
+    # C2: local = 3/3 = 1 -> 21*1 = 21   (con el bug daba 21*3 = 63)
+    assert nodos[C2].req_bruto == 21, "debe usar la cantidad LOCAL (1), no la acumulada (3)"
+    # C3: local = 3/3 = 1 -> 21, wip 36 lo cubre -> 0
+    assert nodos[C3].req_bruto == 21
+    assert nodos[C3].req_neto == 0
+    # C4: local = 6/3 = 2 -> 0*2 = 0     (con el bug daba 918)
+    assert nodos[C4].req_bruto == 0, "el WIP del padre ya cubrio la demanda"
+    assert nodos[C4].req_neto == 0
+
+    # La arista hijo->padre debe viajar con la cantidad local, no la acumulada.
+    assert nodos[C4].padres[0].cantidad_ensamble == 2
+    # `cantidad_ensamble_total` SI conserva la acumulada: son piezas por PT.
+    assert nodos[C4].cantidad_ensamble_total == 6
+
+
+def test_cantidad_ensamble_padre_en_cero_no_revienta():
+    """Un padre con CantidadEnsamble=0 es dato sucio: advertencia, no excepcion."""
+    PT, C1, C2 = 800, 801, 802
+    demanda = [{
+        "idMaterial": PT, "PT": "PT-0", "Descripcion": "Test",
+        "idCliente": 1, "Cliente": "C", "idCiudad": 1, "Ciudad": "City",
+        "PiezasPend": 10, "FechaPromMin": date(2026, 5, 25),
+        "FechaPromMax": date(2026, 5, 25), "PiezasPastDue": 0,
+    }]
+    bom = [
+        FilaBom(IdBom=1, IdBomParent=None, BomLevel=1, idComp=PT, Componente="PT-0",
+                IdPadre=None, idTipoMat=1, CantidadEnsamble=1, HijosTotales=1,
+                bLastLevel=False),
+        FilaBom(IdBom=2, IdBomParent=1, BomLevel=2, idComp=C1, Componente="C1",
+                IdPadre=PT, idTipoMat=3, CantidadEnsamble=0, HijosTotales=1,
+                bLastLevel=False),
+        FilaBom(IdBom=3, IdBomParent=2, BomLevel=3, idComp=C2, Componente="C2",
+                IdPadre=C1, idTipoMat=3, CantidadEnsamble=5, HijosTotales=0,
+                bLastLevel=True),
+    ]
+    arbol = construir_arbol(
+        demanda_filas=demanda, bom_filas=bom, ruta_filas=[], wip_filas=[],
+        almacen_wip_id=ALM_WIP_ID, almacen_wip_nombre=ALM_WIP_NOMBRE,
+    )
+    assert any("CantidadEnsamble=0" in a for a in arbol.advertencias)
 
 
 def test_componente_compartido_suma_req_bruto():
@@ -305,6 +422,104 @@ def test_req_paso_caso_diagrama_usuario():
     assert pasos_c2[1].proceso == "Nivelado"    and pasos_c2[1].req_paso == 213
     assert pasos_c2[2].proceso == "Doblez"      and pasos_c2[2].req_paso == 213
     assert pasos_c2[3].es_virtual               and pasos_c2[3].req_paso == 213
+
+
+def test_cantidad_ensamble_acumulada_se_convierte_a_local():
+    """Regresion: CantidadEnsamble viene ACUMULADA desde el PT raiz.
+
+    Replica el caso real del PT 92691818-A (medido en BD 2026-07):
+
+        92691818-A --3--> 92691826-A --3--> 92691827-A --3--> 92691847-A --6--> 92691848-A
+                          (local 3)         (local 1)         (local 1)         (local 2)
+
+    Las cantidades 3/3/3/6 son acumuladas: la local se recupera dividiendo entre
+    la del padre (3/3=1, 6/3=2). Tratarlas como locales multiplicaba el factor 3
+    en cada nivel y reportaba 918 pzs de 92691848-A donde correspondian 0.
+    """
+    PT, C26, C27, C47, C48 = 918, 926, 927, 947, 948
+
+    demanda = [{
+        "idMaterial": PT, "PT": "92691818-A", "Descripcion": "PT",
+        "idCliente": 1, "Cliente": "C", "idCiudad": 1, "Ciudad": "City",
+        "PiezasPend": 21, "FechaPromMin": date(2026, 5, 25),
+        "FechaPromMax": date(2026, 5, 25), "PiezasPastDue": 0,
+    }]
+    bom = [
+        FilaBom(IdBom=1, IdBomParent=None, BomLevel=1, idComp=PT,
+                Componente="92691818-A", IdPadre=None, idTipoMat=1,
+                CantidadEnsamble=1, HijosTotales=1, bLastLevel=False),
+        FilaBom(IdBom=2, IdBomParent=1, BomLevel=2, idComp=C26,
+                Componente="92691826-A", IdPadre=PT, idTipoMat=3,
+                CantidadEnsamble=3, HijosTotales=1, bLastLevel=False),
+        FilaBom(IdBom=3, IdBomParent=2, BomLevel=3, idComp=C27,
+                Componente="92691827-A", IdPadre=C26, idTipoMat=3,
+                CantidadEnsamble=3, HijosTotales=1, bLastLevel=False),
+        FilaBom(IdBom=4, IdBomParent=3, BomLevel=4, idComp=C47,
+                Componente="92691847-A", IdPadre=C27, idTipoMat=3,
+                CantidadEnsamble=3, HijosTotales=1, bLastLevel=False),
+        FilaBom(IdBom=5, IdBomParent=4, BomLevel=5, idComp=C48,
+                Componente="92691848-A", IdPadre=C47, idTipoMat=3,
+                CantidadEnsamble=6, HijosTotales=0, bLastLevel=True),
+    ]
+    wip = [
+        FilaWip(idComp=PT, idProceso=SOLDADURA, Proceso="Soldadura", Etiquetas=1, Piezas=2),
+        FilaWip(idComp=C26, idProceso=SOLDADURA, Proceso="Soldadura", Etiquetas=1, Piezas=36),
+        FilaWip(idComp=C47, idProceso=SOLDADURA, Proceso="Soldadura", Etiquetas=1, Piezas=36),
+        FilaWip(idComp=C48, idProceso=SOLDADURA, Proceso="Soldadura", Etiquetas=1, Piezas=3),
+    ]
+
+    arbol = construir_arbol(
+        demanda_filas=demanda, bom_filas=bom, ruta_filas=[], wip_filas=wip,
+        almacen_wip_id=ALM_WIP_ID, almacen_wip_nombre=ALM_WIP_NOMBRE,
+    )
+    n = {c.idComp: c for c in arbol.componentes}
+
+    # PT: 21 - 2 = 19
+    assert n[PT].req_neto == 19
+    # 92691826-A: local 3/1 = 3 -> 19*3 = 57, wip 36 -> neto 21
+    assert n[C26].req_bruto == 57
+    assert n[C26].req_neto == 21
+    # 92691827-A: local 3/3 = 1 -> 21*1 = 21  (con la acumulada daria 63)
+    assert n[C27].req_bruto == 21
+    # 92691847-A: local 3/3 = 1 -> 21, wip 36 lo cubre -> neto 0  (antes: 189)
+    assert n[C47].req_bruto == 21
+    assert n[C47].req_neto == 0
+    # 92691848-A: local 6/3 = 2 -> 0*2 = 0  (antes: 918 pzs fantasma)
+    assert n[C48].req_bruto == 0
+    assert n[C48].req_neto == 0
+
+    # La arista al padre debe viajar en cantidad LOCAL, no acumulada.
+    assert n[C48].padres[0].cantidad_ensamble == 2
+    # ...pero cantidad_ensamble_total sigue siendo la acumulada (piezas por PT).
+    assert n[C48].cantidad_ensamble_total == 6
+
+
+def test_cantidad_local_tolera_padre_en_cero():
+    """CantidadEnsamble=0 en el padre: advertencia, no ZeroDivisionError."""
+    PT, C1, C2 = 700, 701, 702
+    demanda = [{
+        "idMaterial": PT, "PT": "PT-Z", "Descripcion": "Test",
+        "idCliente": 1, "Cliente": "C", "idCiudad": 1, "Ciudad": "City",
+        "PiezasPend": 10, "FechaPromMin": date(2026, 5, 25),
+        "FechaPromMax": date(2026, 5, 25), "PiezasPastDue": 0,
+    }]
+    bom = [
+        FilaBom(IdBom=1, IdBomParent=None, BomLevel=1, idComp=PT, Componente="PT-Z",
+                IdPadre=None, idTipoMat=1, CantidadEnsamble=1, HijosTotales=1,
+                bLastLevel=False),
+        FilaBom(IdBom=2, IdBomParent=1, BomLevel=2, idComp=C1, Componente="C1",
+                IdPadre=PT, idTipoMat=3, CantidadEnsamble=0, HijosTotales=1,
+                bLastLevel=False),
+        FilaBom(IdBom=3, IdBomParent=2, BomLevel=3, idComp=C2, Componente="C2",
+                IdPadre=C1, idTipoMat=3, CantidadEnsamble=5, HijosTotales=0,
+                bLastLevel=True),
+    ]
+
+    arbol = construir_arbol(
+        demanda_filas=demanda, bom_filas=bom, ruta_filas=[], wip_filas=[],
+        almacen_wip_id=ALM_WIP_ID, almacen_wip_nombre=ALM_WIP_NOMBRE,
+    )
+    assert any("CantidadEnsamble=0" in w for w in arbol.advertencias)
 
 
 def test_pt_no_tiene_nodo_virtual():

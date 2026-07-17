@@ -2,9 +2,9 @@
 
 > Cuándo cargar: cuando vayas a hacer un cambio en algo que parece "raro" (cache, proxy, types, react-flow, drill-down) y quieras saber por qué está así antes de tocarlo.
 
-## TanStack Query: 5 hooks, 5 strategias de cache
+## TanStack Query: varios hooks, dos strategias de cache (sesión vs TTL corto)
 
-`frontend/src/api/queries.ts` expone 5 hooks con `staleTime` ajustado al volátil de cada dato:
+`frontend/src/api/queries.ts` expone varios hooks con `staleTime` ajustado al volátil de cada dato (lista no exhaustiva — ver el archivo para el resto, ej. `useFlujo`, `useFlujoPlantas`, `useEtiquetasDetalle`):
 
 | Hook | Endpoint | queryKey | staleTime | Por qué |
 | --- | --- | --- | --- | --- |
@@ -13,6 +13,8 @@
 | `useBloques(...)` | `GET /api/bloques` | `["bloques", cliente, planta, ciudadesKey, tiposKey, clasesKey]` | 2 min | Espeja TTL backend. El Resumen muestra movimientos de WIP que cambian durante el día. |
 | `usePtsEnProceso(...)` | `GET /api/bloques/{id}/pts` | `["pts-en-proceso", idProceso, cliente, planta, ciudadesKey, tiposKey, clasesKey]` | 2 min | Mismo razonamiento que bloques. |
 | `usePlantas()` | `GET /api/plantas` | `["plantas"]` | 10 min | Catálogo casi estático. |
+| `useRequerimientoCalendario(ventana, fechaMax, universo)` | `GET /api/requerimiento/calendario` | `["requerimiento-cal", universo, ventana, fechaMaxParam ?? null]` | 5 min | Espeja `usePts` — mismo dataset de demanda, solo que desagregado por fecha. Alimenta `CalendarioPanel`; granularidad/forecast/cliente/ciudad se resuelven client-side sobre el mismo result-set. |
+| `useOrdenDetalle(idMaterial, cliente, ciudad, desde, hasta, forecast)` | `GET /api/requerimiento/orden-detalle` | `["orden-detalle", idMaterial, cliente, ciudad, desde, hasta, forecast]` | 2 min | Popover de detalle de una celda del calendario; `enabled: idMaterial !== null`. |
 
 Reglas para mantener consistencia con el backend:
 

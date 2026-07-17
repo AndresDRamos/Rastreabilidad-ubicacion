@@ -1,8 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Read(//c/Users/ARamos/.claude/plans/**)",
-      "Read(//d/Dev/Proyectos profesionales/Consultor EPS/docs/reportes/**)"
-    ]
+    "allow": ["Read(//c/Users/ARamos/.claude/plans/**)"]
   }
 }

@@ -2,29 +2,60 @@
 
 from __future__ import annotations
 
+import threading
 import time
+from typing import Iterable
 
 import pyodbc
 import structlog
+from cachetools import TTLCache
 
 from ..config import Settings
 from ..domain import db
-from ..domain.modelo import ArbolPT, FilaBom, FilaListado, FilaRuta, FilaWip
+from ..domain.modelo import (
+    ArbolPT,
+    FilaAristaUniverso,
+    FilaBom,
+    FilaDemandaUniverso,
+    FilaListado,
+    FilaRuta,
+    FilaWip,
+    FilaWipUniverso,
+    ReqUniverso,
+)
 from ..domain.netteo import construir_arbol
+from ..domain.universo_req import construir_universo
 
 
 log = structlog.get_logger("rbom_api.services.arbol")
+
+
+# Cache del netteo cross-PT. Key = (ventana, fecha_max_iso | None) — SIN
+# universo: el requerimiento total es un hecho del piso, no depende de la
+# pestana del sidebar (ver db.fetch_universo_req).
+#
+# TTL 5 min = mismo orden que el listado de PTs. Calcularlo cuesta ~1 s (0.8 s
+# de SQL + netteo en memoria del bosque de ~6K nodos), asi que se resuelve
+# inline en el request que lo pide; no hace falta job en background.
+_universo_cache: TTLCache[tuple[int, str | None], dict[int, ReqUniverso]] = TTLCache(
+    maxsize=8, ttl=300
+)
+_universo_lock = threading.Lock()
 
 
 def listar_pts(
     conn: pyodbc.Connection,
     ventana_meses: int,
     fecha_max: str | None = None,
+    universo_ids: Iterable[int] | None = None,
 ) -> list[FilaListado]:
     """Lee Q_listado y valida cada fila contra FilaListado."""
     t0 = time.perf_counter()
     filas = db.fetch_listado(
-        conn, ventana_meses=ventana_meses, fecha_max=fecha_max
+        conn,
+        ventana_meses=ventana_meses,
+        fecha_max=fecha_max,
+        universo_ids=universo_ids,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
@@ -38,14 +69,72 @@ def listar_pts(
     return [FilaListado(**f) for f in filas]
 
 
+def req_universo(
+    conn: pyodbc.Connection,
+    ventana_meses: int,
+    fecha_max: str | None = None,
+) -> dict[int, ReqUniverso]:
+    """Requerimiento cross-PT por componente, cacheado con TTL de 5 min.
+
+    Nettea el bosque completo (todos los PTs con demanda activa). Ver
+    domain/universo_req.py para por que no se puede sumar el netteo por PT.
+    """
+    key = (ventana_meses, fecha_max)
+    with _universo_lock:
+        cached = _universo_cache.get(key)
+    if cached is not None:
+        return cached
+
+    t0 = time.perf_counter()
+    demanda_raw, aristas_raw, wip_raw, pts_comp_raw = db.fetch_universo_req(
+        conn, ventana_meses=ventana_meses, fecha_max=fecha_max
+    )
+    sql_ms = (time.perf_counter() - t0) * 1000
+
+    t1 = time.perf_counter()
+    pts_por_comp: dict[int, list[int]] = {}
+    for fila in pts_comp_raw:
+        pts_por_comp.setdefault(fila["idComp"], []).append(fila["idPT"])
+
+    resultado = construir_universo(
+        demanda_filas=[FilaDemandaUniverso(**f) for f in demanda_raw],
+        arista_filas=[FilaAristaUniverso(**f) for f in aristas_raw],
+        wip_filas=[FilaWipUniverso(**f) for f in wip_raw],
+        pts_por_comp=pts_por_comp,
+    )
+    netteo_ms = (time.perf_counter() - t1) * 1000
+
+    log.info(
+        "universo_req_done",
+        ventana_meses=ventana_meses,
+        fecha_max=fecha_max,
+        n_pts=len(demanda_raw),
+        n_aristas=len(aristas_raw),
+        n_componentes=len(resultado),
+        n_ciclicos=sum(1 for r in resultado.values() if r.ciclico),
+        sql_ms=round(sql_ms, 2),
+        netteo_ms=round(netteo_ms, 2),
+    )
+
+    with _universo_lock:
+        _universo_cache[key] = resultado
+    return resultado
+
+
 def armar_arbol(
     conn: pyodbc.Connection,
     idPt: int,
     ventana_meses: int,
     settings: Settings,
     fecha_max: str | None = None,
+    con_universo: bool = True,
 ) -> ArbolPT:
-    """Lee Q_detalle (4 result-sets), valida y arma el arbol netteado."""
+    """Lee Q_detalle (4 result-sets), valida y arma el arbol netteado.
+
+    Si `con_universo`, cada componente se enriquece con su requerimiento
+    cross-PT (`req_universo`). Un fallo ahi NO tumba el arbol: el requerimiento
+    del PT es el dato principal y la leyenda del universo es informativa.
+    """
     t0 = time.perf_counter()
     demanda, bom_raw, ruta_raw, wip_raw = db.fetch_detalle(
         conn, idPT=idPt, ventana_meses=ventana_meses, fecha_max=fecha_max
@@ -85,4 +174,34 @@ def armar_arbol(
         n_advertencias=len(arbol.advertencias),
         duration_ms=round(elapsed_ms, 2),
     )
+
+    if con_universo:
+        _hidratar_req_universo(conn, arbol, ventana_meses, fecha_max)
+
     return arbol
+
+
+def _hidratar_req_universo(
+    conn: pyodbc.Connection,
+    arbol: ArbolPT,
+    ventana_meses: int,
+    fecha_max: str | None,
+) -> None:
+    """Cuelga el requerimiento cross-PT en cada componente del arbol (in-place).
+
+    Degrada con gracia: si el universo falla (BD lenta, dato sucio), el arbol se
+    entrega sin la leyenda en vez de devolver un 500. El requerimiento del PT ya
+    esta calculado y es el dato que el planner necesita.
+    """
+    try:
+        universo = req_universo(conn, ventana_meses=ventana_meses, fecha_max=fecha_max)
+    except Exception as exc:  # noqa: BLE001 — la leyenda es informativa, no critica
+        arbol.advertencias.append(
+            "No se pudo calcular el requerimiento total entre PTs; "
+            "el arbol muestra solo el requerimiento de este PT."
+        )
+        log.warning("universo_req_failed", idPt=arbol.pt.idMaterial, error=str(exc))
+        return
+
+    for comp in arbol.componentes:
+        comp.req_universo = universo.get(comp.idComp)

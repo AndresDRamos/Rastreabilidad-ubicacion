@@ -1,10 +1,7 @@
 # Rastreabilidad BOM — App v2 (FastAPI + React Flow)
 
 App web moderna para visualizar el árbol BOM netteado con WIP por proceso para
-PTs con demanda activa. Reemplaza la herramienta Streamlit en
-`Consultor EPS/tools/rastreabilidad-bom/` y reutiliza íntegramente la lógica de
-negocio validada (8 tests pytest verdes contra el contrato del netteo + 4 tests
-e2e contra BD real).
+PTs con demanda activa.
 
 - **Backend**: FastAPI 0.115 + pyodbc + pydantic v2 (Python 3.12)
 - **Frontend**: React 18.3 + `@xyflow/react` 12 + Tailwind 3 + TanStack Query + zustand (Vite)

@@ -5,7 +5,8 @@ import { useUiStore } from "@/store/useUiStore";
 
 /**
  * Multi-select de ciudades derivado de los PTs con demanda activa.
- * Si hay clienteId fijado, restringe las opciones a las ciudades de ese cliente.
+ * Si hay clientes fijados, restringe las opciones a las ciudades de esos
+ * clientes.
  *
  * Almacena `ciudadIds: number[]` en el store. El backend recibe el CSV
  * `?ciudades=137,737` para acotar el universo de Q_bloques / Q_pts_en_proceso.
@@ -13,16 +14,17 @@ import { useUiStore } from "@/store/useUiStore";
 export function CiudadMultiSelect() {
   const ventana = useUiStore((s) => s.ventana);
   const fechaMax = useUiStore((s) => s.filters.fechaMax);
-  const clienteId = useUiStore((s) => s.filters.clienteId);
+  const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const setFilter = useUiStore((s) => s.setFilter);
   const { data: filas } = usePts(ventana, fechaMax);
 
   const opciones = useMemo(() => {
     if (!filas) return [] as { id: number; nombre: string }[];
+    const clienteSet = clienteIds.length > 0 ? new Set(clienteIds) : null;
     const seen = new Map<number, string>();
     for (const f of filas) {
-      if (clienteId != null && f.idCliente !== clienteId) continue;
+      if (clienteSet != null && (f.idCliente == null || !clienteSet.has(f.idCliente))) continue;
       if (f.idCiudad != null && !seen.has(f.idCiudad)) {
         seen.set(f.idCiudad, f.Ciudad);
       }
@@ -30,20 +32,33 @@ export function CiudadMultiSelect() {
     return Array.from(seen.entries())
       .map(([id, nombre]) => ({ id, nombre }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre, "es-MX"));
-  }, [filas, clienteId]);
+  }, [filas, clienteIds]);
 
-  // Cuando cambia el cliente (o el universo de PTs), quitar del filtro las
-  // ciudades que ya no aplican. NO correr mientras filas esta cargando: en
-  // ese momento opciones=[] y borrariamos la seleccion del usuario.
+  // Cascada de dependencia: si el cliente pasa de tener seleccion a quedar
+  // vacio, la ciudad depende semanticamente del cliente y se limpia entera
+  // (no solo se purgan invalidas, porque al quedar clienteIds=[] el universo
+  // de `opciones` pasa a ser TODAS las ciudades y la purga por invalidez ya
+  // no dispara). Con clienteIds no-vacio, se mantiene la purga fina de
+  // ciudades que dejaron de pertenecer a los clientes seleccionados.
+  const prevHadClienteRef = useRef(clienteIds.length > 0);
   useEffect(() => {
     if (!filas) return;
+    const hadCliente = prevHadClienteRef.current;
+    const hasCliente = clienteIds.length > 0;
+    if (hadCliente && !hasCliente) {
+      if (ciudadIds.length > 0) setFilter("ciudadIds", []);
+      prevHadClienteRef.current = hasCliente;
+      return;
+    }
+    prevHadClienteRef.current = hasCliente;
+
     if (ciudadIds.length === 0) return;
     const validIds = new Set(opciones.map((o) => o.id));
     const next = ciudadIds.filter((id) => validIds.has(id));
     if (next.length !== ciudadIds.length) {
       setFilter("ciudadIds", next);
     }
-  }, [filas, opciones, ciudadIds, setFilter]);
+  }, [filas, opciones, ciudadIds, clienteIds, setFilter]);
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -71,10 +86,11 @@ export function CiudadMultiSelect() {
         ? opciones.find((o) => o.id === ciudadIds[0])?.nombre ?? "1 ciudad"
         : `${ciudadIds.length} ciudades`;
 
-  // Solo mostrar el selector cuando hay un cliente seleccionado Y ese cliente
-  // tiene mas de un destino. Sin cliente, no aparece. Mientras `filas` carga
-  // el componente queda montado para no perder la seleccion previa.
-  if (clienteId == null) return null;
+  // Solo mostrar el selector cuando hay al menos un cliente seleccionado Y
+  // ese universo tiene mas de un destino. Sin cliente, no aparece. Mientras
+  // `filas` carga el componente queda montado para no perder la seleccion
+  // previa.
+  if (clienteIds.length === 0) return null;
   if (filas && opciones.length <= 1) return null;
 
   function toggle(id: number) {

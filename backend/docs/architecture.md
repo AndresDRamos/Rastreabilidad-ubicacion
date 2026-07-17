@@ -18,7 +18,8 @@
               │     Routers (routers/)   │   /health
               │   thin: parse → service  │   /api/pts        /api/pts/{id}/arbol
               │   con cache TTL opcional │   /api/bloques    /api/bloques/{id}/pts
-              └──────────────┬───────────┘   /api/plantas
+              │                          │   /api/plantas    /api/requerimiento/calendario
+              └──────────────┬───────────┘   /api/requerimiento/orden-detalle
                              │  Depends(get_conn) → pyodbc.Connection
                              ▼
               ┌──────────────────────────┐
@@ -55,7 +56,7 @@
 | Archivo | Líneas (aprox.) | Responsabilidad |
 | --- | --- | --- |
 | `__init__.py` | 1 | Expone `__version__ = "0.1.0"`. |
-| `main.py` | ~66 | App factory `create_app()`. Orden: middlewares → routers (`health`, `pts`, `arbol`, `bloques`) → StaticFiles (si existe `static/`). Exporta `app = create_app()` para uvicorn. |
+| `main.py` | ~66 | App factory `create_app()`. Orden: middlewares → routers (`health`, `pts`, `arbol`, `bloques`, `requerimiento`, `export`) → StaticFiles (si existe `static/`). Exporta `app = create_app()` para uvicorn. |
 | `config.py` | ~62 | `Settings` (pydantic-settings) + `get_settings()` (`@lru_cache`). Define `SQL_DIR = Path(__file__).parent / "sql"`. Construye `conn_string` para pyodbc. |
 | `deps.py` | ~25 | `get_conn()` generador: abre `pyodbc.connect()`, hace `yield`, cierra en `finally`. FastAPI lo inyecta con `Depends(get_conn)`. |
 | `logging_setup.py` | ~86 | `configurar_logging()` + `CorrelationIdMiddleware`. structlog `ConsoleRenderer` en dev, `JSONRenderer` en prod. Genera/propaga `X-Correlation-Id`. |
@@ -63,15 +64,18 @@
 | `routers/pts.py` | ~50 | `GET /api/pts?ventana=N&fecha_max=YYYY-MM-DD` → `list[FilaListado]`. **Cache TTL=300s, maxsize=32, threading.Lock**. Key = `(ventana, fecha_max_iso \| None)`. |
 | `routers/arbol.py` | ~43 | `GET /api/pts/{idPt}/arbol?ventana=N&fecha_max=YYYY-MM-DD` → `ArbolPT`. Sin cache server-side (TanStack del frontend cachea infinito). 404 si `ValueError`. |
 | `routers/bloques.py` | ~210 | Vista Resumen — 3 endpoints con cache propio: `GET /api/bloques` (TTL=120s, maxsize=128), `GET /api/bloques/{idProceso}/pts` (TTL=120s, maxsize=256), `GET /api/plantas` (TTL=600s, maxsize=1). Acepta CSV `ciudades=…&tipos_material=…&clases=…` y los parsea con `_parse_int_csv`. |
+| `routers/requerimiento.py` | ~134 | Vista Calendario de requerimiento — `GET /api/requerimiento/calendario` (`ventana`, `fecha_max`, `universo`; TTL=300s, maxsize=32, key=(universo, ventana, fecha_max)) y `GET /api/requerimiento/orden-detalle` (`idMaterial` requerido + `cliente`/`ciudad`/`desde`/`hasta`/`forecast`; TTL=120s, maxsize=256). |
 | `services/arbol_service.py` | ~90 | `listar_pts(conn, ventana, fecha_max)` y `armar_arbol(conn, idPt, ventana, settings, fecha_max)`. Validan pydantic, loguean duración, delegan a `domain/`. |
-| `domain/modelo.py` | ~192 | 13 modelos pydantic. Entrada: `FilaListado`, `FilaBom`, `FilaRuta`, `FilaWip`. Salida árbol: `DemandaPT`, `PasoRuta`, `AristaPadre`, `NodoComponente`, `ArbolPT`. Salida Resumen: `BloqueProceso`, `PTEnProceso`, `Planta`. Base con `extra="ignore"`. |
+| `domain/modelo.py` | ~192 | 15 modelos pydantic. Entrada: `FilaListado`, `FilaBom`, `FilaRuta`, `FilaWip`. Salida árbol: `DemandaPT`, `PasoRuta`, `AristaPadre`, `NodoComponente`, `ArbolPT`. Salida Resumen: `BloqueProceso`, `PTEnProceso`, `Planta`. Salida Calendario: `CeldaCalendario` (demanda desagregada por PT × Cliente × Ciudad × Fecha × bForecast), `OrdenLinea` (línea de orden de venta de una celda). Base con `extra="ignore"`. |
 | `domain/netteo.py` | ~342 | `construir_arbol(...)` — algoritmo de 2 pasadas. Consolida demanda multi-cliente. Helpers: `_topological_sort` (Kahn), `_bfs_reachable`, `_construir_pasos` (agrupación + buffer virtual + pasada inversa), `_fmt`. |
-| `domain/db.py` | ~210 | Lectores SQL: `fetch_listado`, `fetch_detalle` (multi-resultset), `fetch_bloques`, `fetch_pts_en_proceso`, `fetch_plantas`. Helpers: `_strip_param_declarations`, `_decl_int`, `_ciudades_predicate`, `_tipomat_predicate`, `_clase_predicate`. `ping(conn)` para `/health`. |
+| `domain/db.py` | ~210 | Lectores SQL: `fetch_listado`, `fetch_detalle` (multi-resultset), `fetch_bloques`, `fetch_pts_en_proceso`, `fetch_plantas`, `fetch_requerimiento_calendario`, `fetch_orden_detalle`. Helpers: `_strip_param_declarations`, `_decl_int`, `_ciudades_predicate`, `_tipomat_predicate`, `_clase_predicate`, `_cliente_eq_predicate`, `_ciudad_eq_predicate`, `_fecha_rango_predicate`, `_forecast_predicate`. `ping(conn)` para `/health`. |
 | `sql/Q_listado.sql` | ~63 | PTs con demanda activa en `tblDemandaEPS`. Past-due incluido (sin piso de fecha). `@fecha_max` opcional. JOIN con NETSUITE para `idClase`/`Clase`. Agrupa por (idMaterial, idCliente, idCiudad, idClase). |
 | `sql/Q_detalle.sql` | ~205 | 4 result-sets para un PT: DEMANDA, BOM (`tblBomExplosionado`, filtro `IdTipoMaterial IN (1,3)`, expone `PrimerIdProceso`/`UltimoIdProceso`), RUTA (`tblMaterialRutaTiempo` + `LEAD()`), WIP en 3 buckets (Por procesar / Liberadas / En Inspección) con `EXCEPT vwEtiquetasEnRemision`. |
 | `sql/Q_bloques.sql` | ~110 | Una fila por `idProcesoSiguiente` con totales WIP. Filtros opcionales por cliente, planta, ciudades (`/*CIUDADES_FILTER*/`), tipos material (`/*TIPOMAT_FILTER*/`) y clase NetSuit (`/*CLASE_FILTER*/`). Bandera `@conFiltroUniverso` activa el filtrado por componentes de PTs con demanda. |
 | `sql/Q_pts_en_proceso.sql` | ~95 | PTs cuyos componentes tienen WIP esperando entrar a `@idProcesoSelected`. Mismos placeholders de filtros que `Q_bloques`. |
 | `sql/Q_plantas.sql` | ~30 | Plantas con al menos una etiqueta activa (no remisionada). Alimenta el dropdown. |
+| `sql/Q_requerimiento_calendario.sql` | ~56 | Clon aligerado de `Q_listado.sql` que NO colapsa la fecha: una fila por (PT × Cliente × Ciudad × Fecha[día] × bForecast). `PiezasPend = SUM(Cantidad - Embarcado)`. Past-due incluido. Incluye `/*PT_UNIVERSO_FILTER*/`. El frontend bucketiza a día/semana/mes sin re-consultar. |
+| `sql/Q_orden_detalle.sql` | ~36 | Líneas de demanda de una celda del calendario: `OrdenVenta`, `POHeader`/`POLine`, `Fecha`, `PiezasPend`, `Precio_Unitario`. Placeholders `/*CLIENTE_FILTER*/`, `/*CIUDAD_FILTER*/`, `/*FECHA_FILTER*/` (rango `[desde, hasta)`), `/*FORECAST_FILTER*/`. |
 
 ## Ciclo de vida de la conexión
 
@@ -120,6 +124,7 @@ Patrón actual (sirve para escalar):
 - **`pts.py`**: cache simple keyed por (ventana, fecha_max). Pocas variantes, datos pesados de hidratar.
 - **`arbol.py`**: sin cache server-side. El cliente cachea infinito por sesión y el resultado es muy específico (un PT × ventana × fecha_max).
 - **`bloques.py`**: cache multi-key con tuplas ordenadas, una `TTLCache` por endpoint. Filtros opcionales.
+- **`requerimiento.py`**: dos endpoints, cada uno con su propio patrón. `/calendario` sigue el patrón de `pts.py` (cache simple keyed por `(universo, ventana, fecha_max)`, TTL 300s — espeja `/api/pts` porque alimenta el mismo panel/filtros). `/orden-detalle` es más específico por celda (`idMaterial` + cliente/ciudad/rango/forecast), TTL 120s más corto y `maxsize` más alto (256) porque la combinatoria de celdas es grande pero cada hit es barato.
 
 Si vas a agregar un endpoint nuevo:
 

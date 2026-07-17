@@ -79,11 +79,18 @@ def construir_arbol(
         )
 
     # ---- Indices del BOM -----------------------------------------------------
+    advertencias: list[str] = []
     pt_root_id: int | None = None
     info_comp: dict[int, FilaBom] = {}
     cantidad_ensamble_total: dict[int, float] = defaultdict(float)
     padres_de: dict[int, list[tuple[int, float]]] = defaultdict(list)
     hijos_de: dict[int, set[int]] = defaultdict(set)
+
+    # CantidadEnsamble viene ACUMULADA desde el PT raiz (ver _cantidad_local).
+    # Para derivar la local hace falta la cantidad de la fila EXACTA del padre,
+    # localizada por IdBomParent -> IdBom. No sirve `cantidad_ensamble_total`
+    # del padre: si el padre es shared, esa suma agrega sus varias apariciones.
+    cant_por_idbom: dict[int, float] = {fb.IdBom: fb.CantidadEnsamble for fb in bom_filas}
 
     for fb in bom_filas:
         if fb.IdPadre is None and fb.IdBomParent is None:
@@ -95,32 +102,47 @@ def construir_arbol(
             guardada = info_comp[fb.idComp]
             if fb.PrimerIdProceso is not None and guardada.PrimerIdProceso is None:
                 info_comp[fb.idComp] = fb
+        # Suma cruda de acumulados = piezas del componente por unidad de PT.
+        # Bajo la semantica acumulada esto SI tiene significado; no convertir a local.
         cantidad_ensamble_total[fb.idComp] += fb.CantidadEnsamble
         if fb.IdPadre is not None:
-            padres_de[fb.idComp].append((fb.IdPadre, fb.CantidadEnsamble))
+            local = _cantidad_local(fb, cant_por_idbom, advertencias)
+            padres_de[fb.idComp].append((fb.IdPadre, local))
             hijos_de[fb.IdPadre].add(fb.idComp)
 
     if pt_root_id is None:
         raise ValueError("No se encontro el PT raiz en tblBomExplosionado (IdPadre=NULL).")
 
     # ---- WIP por componente y por (componente, proceso) ---------------------
-    # Solo el bucket "Por procesar" (Piezas/Etiquetas) alimenta el netteo.
-    # Liberadas / Inspección son solo display y no descuentan demanda.
+    # Solo el bucket Piezas (Disponibles + Recibidas) alimenta el netteo.
+    # Liberadas / Inspección / Retrabajo son solo display y no descuentan demanda.
     wip_total: dict[int, float] = defaultdict(float)
     wip_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    disponibles_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_disponibles_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    recibidas_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_recibidas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     liberadas_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     inspeccion_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_inspeccion_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    retrabajo_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_retrabajo_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     for fw in wip_filas:
         wip_total[fw.idComp] += fw.Piezas
         wip_por_paso[(fw.idComp, fw.idProceso)] += fw.Piezas
         etiquetas_por_paso[(fw.idComp, fw.idProceso)] += fw.Etiquetas
+        disponibles_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasDisponibles
+        etiquetas_disponibles_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasDisponibles
+        recibidas_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasRecibidas
+        etiquetas_recibidas_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasRecibidas
         liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasLiberadas
         etiquetas_liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasLiberadas
         inspeccion_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasInspeccion
         etiquetas_inspeccion_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasInspeccion
+        retrabajo_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasRetrabajo
+        etiquetas_retrabajo_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasRetrabajo
 
     # ---- Orden topologico (Kahn): asegura padres antes que hijos -------------
     orden = _topological_sort(pt_root_id, hijos_de, padres_de)
@@ -148,7 +170,8 @@ def construir_arbol(
         lst.sort(key=lambda r: r.OrdenRuta)
 
     # ---- Construir nodos -----------------------------------------------------
-    advertencias: list[str] = []
+    # `advertencias` ya viene del indexado del BOM (puede traer avisos de
+    # cantidad de ensamble); aqui se le suman los outliers de WIP fuera de ruta.
     nodos: list[NodoComponente] = []
 
     for idComp in orden:
@@ -159,10 +182,16 @@ def construir_arbol(
             ruta=rutas_by_comp.get(idComp, []),
             wip_por_paso=wip_por_paso,
             etiquetas_por_paso=etiquetas_por_paso,
+            disponibles_por_paso=disponibles_por_paso,
+            etiquetas_disponibles_por_paso=etiquetas_disponibles_por_paso,
+            recibidas_por_paso=recibidas_por_paso,
+            etiquetas_recibidas_por_paso=etiquetas_recibidas_por_paso,
             liberadas_por_paso=liberadas_por_paso,
             etiquetas_liberadas_por_paso=etiquetas_liberadas_por_paso,
             inspeccion_por_paso=inspeccion_por_paso,
             etiquetas_inspeccion_por_paso=etiquetas_inspeccion_por_paso,
+            retrabajo_por_paso=retrabajo_por_paso,
+            etiquetas_retrabajo_por_paso=etiquetas_retrabajo_por_paso,
             req_bruto=req_bruto[idComp],
             es_pt=es_pt,
             almacen_wip_id=almacen_wip_id,
@@ -201,6 +230,55 @@ def construir_arbol(
         ))
 
     return ArbolPT(pt=pt_obj, componentes=nodos, advertencias=advertencias)
+
+
+def _cantidad_local(
+    fb: FilaBom,
+    cant_por_idbom: dict[int, float],
+    advertencias: list[str],
+) -> float:
+    """Deriva la cantidad de ensamble LOCAL (piezas de C por unidad de su padre).
+
+    `tblBomExplosionado.CantidadEnsamble` viene **acumulada desde el PT raiz**:
+    es cuantas piezas del componente lleva UNA unidad del PT, ya multiplicada por
+    los factores de todos los niveles superiores. La local se recupera dividiendo
+    entre la cantidad del padre.
+
+    Verificado contra BD real: la arista `92691847-A -> 92691848-A` aparece en 5
+    arboles con CantidadEnsamble 2 o 6 segun el factor de sus ancestros, pero la
+    local derivada da **2 en los 5 casos** — invariante, como corresponde a una
+    propiedad del par padre-hijo. En las 4,728 filas del universo de demanda la
+    division da entero exacto en el 100% de los casos.
+
+    El netteo necesita la LOCAL porque ya propaga el factor del padre via
+    `req_neto[padre]`. Usar la acumulada re-aplica ese factor y el error se
+    compone por nivel (medido: hasta 3x por nivel, en 15 PTs / 59 nodos).
+    """
+    if fb.IdBomParent is None:
+        return fb.CantidadEnsamble  # hijo directo de la raiz: acumulada == local
+
+    cant_padre = cant_por_idbom.get(fb.IdBomParent)
+    if cant_padre is None:
+        # El padre quedo fuera del filtro IdTipoMaterial IN (1,3). Ese nodo
+        # tampoco es alcanzable desde la raiz, asi que no deberia entrar al
+        # netteo; se devuelve la acumulada sin dividir en vez de asumir.
+        return fb.CantidadEnsamble
+    if cant_padre == 0:
+        advertencias.append(
+            f"{fb.Componente}: el padre (IdBom={fb.IdBomParent}) tiene "
+            f"CantidadEnsamble=0; no se pudo derivar la cantidad local "
+            f"(se usa la acumulada {_fmt(fb.CantidadEnsamble)})"
+        )
+        return fb.CantidadEnsamble
+
+    local = fb.CantidadEnsamble / cant_padre
+    # La division de floats mete ruido (ej. 0.30000000000000004). Si el valor
+    # esta a un pelo de un entero, se ajusta; si es genuinamente fraccionario
+    # (materiales por metro/kilo), se respeta tal cual.
+    entero = round(local)
+    if abs(local - entero) < 1e-6:
+        return float(entero)
+    return local
 
 
 def _topological_sort(
@@ -249,10 +327,16 @@ def _construir_pasos(
     ruta: list[FilaRuta],
     wip_por_paso: dict[tuple[int, int | None], float],
     etiquetas_por_paso: dict[tuple[int, int | None], int],
+    disponibles_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_disponibles_por_paso: dict[tuple[int, int | None], int],
+    recibidas_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_recibidas_por_paso: dict[tuple[int, int | None], int],
     liberadas_por_paso: dict[tuple[int, int | None], float],
     etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int],
     inspeccion_por_paso: dict[tuple[int, int | None], float],
     etiquetas_inspeccion_por_paso: dict[tuple[int, int | None], int],
+    retrabajo_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_retrabajo_por_paso: dict[tuple[int, int | None], int],
     req_bruto: float,
     es_pt: bool,
     almacen_wip_id: int,
@@ -300,10 +384,16 @@ def _construir_pasos(
             es_virtual=False,
             wip_en_paso=wip_por_paso.get(key, 0.0),
             etiquetas_en_paso=etiquetas_por_paso.get(key, 0),
+            disponibles=disponibles_por_paso.get(key, 0.0),
+            etiquetas_disponibles=etiquetas_disponibles_por_paso.get(key, 0),
+            recibidas=recibidas_por_paso.get(key, 0.0),
+            etiquetas_recibidas=etiquetas_recibidas_por_paso.get(key, 0),
             liberadas=liberadas_por_paso.get(key, 0.0),
             etiquetas_liberadas=etiquetas_liberadas_por_paso.get(key, 0),
             en_inspeccion=inspeccion_por_paso.get(key, 0.0),
             etiquetas_inspeccion=etiquetas_inspeccion_por_paso.get(key, 0),
+            retrabajo=retrabajo_por_paso.get(key, 0.0),
+            etiquetas_retrabajo=etiquetas_retrabajo_por_paso.get(key, 0),
             req_paso=0.0,
             label="",
         ))
@@ -319,12 +409,22 @@ def _construir_pasos(
             es_virtual=True,
             wip_en_paso=wip_por_paso.get(key_virt, 0.0),
             etiquetas_en_paso=etiquetas_por_paso.get(key_virt, 0),
-            # Liberadas / Inspección no aplican al Almacén WIP virtual (idProceso=16
-            # es un proceso de catálogo, no físico — no genera bUltimoProceso=1).
+            # En el Almacen WIP virtual asumimos que todo el "wip_en_paso" esta
+            # fisicamente en el almacen -> contribuye a "Recibidas" para fines
+            # de display. Disponibles = 0 (no hay "en transito" hacia almacen).
+            disponibles=0.0,
+            etiquetas_disponibles=0,
+            recibidas=wip_por_paso.get(key_virt, 0.0),
+            etiquetas_recibidas=etiquetas_por_paso.get(key_virt, 0),
+            # Liberadas / Inspeccion / Retrabajo no aplican al Almacen WIP
+            # virtual (idProceso=16 es de catalogo, no fisico -> no genera
+            # bUltimoProceso=1).
             liberadas=0.0,
             etiquetas_liberadas=0,
             en_inspeccion=0.0,
             etiquetas_inspeccion=0,
+            retrabajo=0.0,
+            etiquetas_retrabajo=0,
             req_paso=0.0,
             label="",
         ))

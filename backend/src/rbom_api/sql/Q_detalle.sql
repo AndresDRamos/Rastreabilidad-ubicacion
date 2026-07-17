@@ -119,21 +119,34 @@ FROM
 ORDER BY mrt.idMaterial, mrt.OrdenFabricacion;
 
 
--- (4) WIP por (componente, proceso) en 3 buckets ------------------------------
---   Por procesar = idProcesoSiguiente = idProceso ∧ estatus = LIBERADO (=2)
---                  Mismas piezas que el CTE anterior; alimenta el netteo.
---   Liberadas    = bUltimoProceso(idProceso) ∧ estatus = LIBERADO (=2)
---                  Piezas que YA salieron de este proceso (buffer hacia el sig).
---   En Inspección= bUltimoProceso(idProceso) ∧ estatus = POR INSPECCION (=1)
---                  Piezas que pasaron por este proceso pero aún están en QC.
+-- (4) WIP por (componente, proceso) en 5 buckets ------------------------------
+--   Disponibles    estatus=LIBERADO, idProcesoSiguiente=X, ubicacion <> X
+--                  (espera entrar a X, no llego fisicamente)
+--   Recibidas      estatus=LIBERADO, idProcesoSiguiente=X, ubicacion = X
+--                  (ya esta fisicamente en X)
+--   PorTransferir  estatus=LIBERADO, procesoActual=X, idProcesoSiguiente<>X,
+--                  ubicacion <> idProcesoSiguiente
+--                  (X la libero pero aun NO ha llegado fisicamente al siguiente
+--                   proceso; cuando llega ubic=sig, cuenta como Recibidas del
+--                   siguiente y deja de contar como PorTransferir de X.)
+--   Inspeccion     estatus=POR INSPECCION (=1), procesoActual=X
+--   Retrabajo      estatus=POR RETRABAJO (=5), procesoActual=X
 --
--- Garantía de no-duplicación:
---   - LEFT JOIN a tblEtiquetaProceso con bUltimoProceso=1: validado contra BD
---     que las únicas etiquetas con esa flag duplicada son bActiva=false; el
---     filtro `e.bActiva = 1` las excluye.
---   - UNION ALL puede repetir una etiqueta en dos buckets distintos, pero NO
---     en el mismo (idComp, idProceso): si idProcesoSiguiente=X entonces el
---     último proceso histórico ≠ X.
+--   Piezas = Disponibles + Recibidas (suma compat con el netteo): es el
+--   conjunto que aun debe pasar por X y por tanto descuenta req_paso.
+--   PorTransferir / Inspeccion / Retrabajo son SOLO display.
+--
+-- procesoActual = LEFT JOIN a tblEtiquetaProceso(bUltimoProceso=1).idProceso
+-- (fuente directa, no inferida de la ruta). Si una etiqueta nunca fue procesada
+-- por ningun proceso, procesoActual = NULL y no entra en PT/Insp/Ret.
+--
+-- Garantia de no-duplicacion:
+--   - Validado contra BD que las unicas etiquetas con bUltimoProceso=1
+--     duplicada son bActiva=false; el filtro `e.bActiva = 1` las excluye.
+--   - Dentro de un mismo (idComp, idProceso), Disponibles y Recibidas son
+--     disjuntas por la condicion sobre ubicacion; con PorTransferir solo
+--     habria solape si procesoSiguiente = procesoActual = X (loop trivial),
+--     descartado por la condicion `procesoActual <> idProcesoSiguiente`.
 WITH
   cteCompArbol
   AS
@@ -156,15 +169,17 @@ WITH
       ,e.idProcesoSiguiente
       ,e.idEstatusEtiqueta
       ,e.cantidad
-      ,ep.idProceso               AS idProcesoUlt  -- último proceso histórico (NULL si no tiene)
+      ,u.idProceso                AS procesoUbicacion
+      ,ep.idProceso               AS idProcesoUlt  -- proceso actual (ultimo por el que paso). NULL si nunca paso.
     FROM
       EPS.Produccion.tblEtiqueta e
+      LEFT JOIN EPS.Produccion.tblUbicacion u ON e.idUbicacion = u.idUbicacion
       LEFT JOIN EPS.Produccion.tblEtiquetaProceso ep
              ON ep.idEtiqueta = e.idEtiqueta
             AND ep.bUltimoProceso = 1
     WHERE e.bActiva           = 1
       AND e.idTipoEtiqueta    = 3              -- LIBERACION
-      AND e.idEstatusEtiqueta IN (1, 2)        -- POR INSPECCION + LIBERADO
+      AND e.idEstatusEtiqueta IN (1, 2, 5)      -- POR INSPECCION / LIBERADO / POR RETRABAJO
       AND e.idMaterial IN (SELECT IdComponent FROM cteCompArbol)
       AND NOT EXISTS (
             SELECT 1
@@ -175,29 +190,71 @@ WITH
   cteBuckets
   AS
   (
+    -- Disponibles: estatus=2, sig=X, ubic <> X
     SELECT idComp, idProcesoSiguiente AS idProceso, cantidad,
-           1 AS bPorProcesar, 0 AS bLiberadas, 0 AS bInspeccion
+           1 AS bDisp, 0 AS bRecib, 0 AS bTrans, 0 AS bInsp, 0 AS bRetrab
     FROM cteEtq
     WHERE idEstatusEtiqueta = 2 AND idProcesoSiguiente IS NOT NULL
+      AND (procesoUbicacion IS NULL OR procesoUbicacion <> idProcesoSiguiente)
+
     UNION ALL
-    SELECT idComp, idProcesoUlt, cantidad, 0, 1, 0
+
+    -- Recibidas: estatus=2, sig=X, ubic = X
+    SELECT idComp, idProcesoSiguiente, cantidad,
+           0, 1, 0, 0, 0
     FROM cteEtq
-    WHERE idEstatusEtiqueta = 2 AND idProcesoUlt IS NOT NULL
+    WHERE idEstatusEtiqueta = 2 AND idProcesoSiguiente IS NOT NULL
+      AND procesoUbicacion = idProcesoSiguiente
+
     UNION ALL
-    SELECT idComp, idProcesoUlt, cantidad, 0, 0, 1
+
+    -- PorTransferir: estatus=2, procActual=X, sig != X, ubic <> sig
+    -- (la etiqueta salio de X pero aun no llego fisicamente al siguiente;
+    --  cuando ubic=sig deja de ser "Por transferir" en X y cuenta como
+    --  "Recibidas" del siguiente.)
+    SELECT idComp, idProcesoUlt, cantidad,
+           0, 0, 1, 0, 0
+    FROM cteEtq
+    WHERE idEstatusEtiqueta = 2
+      AND idProcesoUlt IS NOT NULL
+      AND idProcesoSiguiente IS NOT NULL
+      AND idProcesoUlt <> idProcesoSiguiente
+      AND (procesoUbicacion IS NULL OR procesoUbicacion <> idProcesoSiguiente)
+
+    UNION ALL
+
+    -- Inspeccion: estatus=1, procActual=X
+    SELECT idComp, idProcesoUlt, cantidad,
+           0, 0, 0, 1, 0
     FROM cteEtq
     WHERE idEstatusEtiqueta = 1 AND idProcesoUlt IS NOT NULL
+
+    UNION ALL
+
+    -- Retrabajo: estatus=5, procActual=X
+    SELECT idComp, idProcesoUlt, cantidad,
+           0, 0, 0, 0, 1
+    FROM cteEtq
+    WHERE idEstatusEtiqueta = 5 AND idProcesoUlt IS NOT NULL
   )
 SELECT
-  b.idComp
+   b.idComp
   ,b.idProceso
-  ,ISNULL(p.Nombre, '(sin proceso)')                              AS Proceso
-  ,SUM(CASE WHEN b.bPorProcesar = 1 THEN 1 ELSE 0 END)            AS Etiquetas
-  ,SUM(CASE WHEN b.bPorProcesar = 1 THEN b.cantidad ELSE 0 END)   AS Piezas
-  ,SUM(CASE WHEN b.bLiberadas   = 1 THEN 1 ELSE 0 END)            AS EtiquetasLiberadas
-  ,SUM(CASE WHEN b.bLiberadas   = 1 THEN b.cantidad ELSE 0 END)   AS PiezasLiberadas
-  ,SUM(CASE WHEN b.bInspeccion  = 1 THEN 1 ELSE 0 END)            AS EtiquetasInspeccion
-  ,SUM(CASE WHEN b.bInspeccion  = 1 THEN b.cantidad ELSE 0 END)   AS PiezasInspeccion
+  ,ISNULL(p.Nombre, '(sin proceso)')                                           AS Proceso
+  -- Compat con netteo: Piezas/Etiquetas = Disponibles + Recibidas
+  ,SUM(CASE WHEN b.bDisp = 1 OR b.bRecib = 1 THEN 1 ELSE 0 END)                AS Etiquetas
+  ,SUM(CASE WHEN b.bDisp = 1 OR b.bRecib = 1 THEN b.cantidad ELSE 0 END)       AS Piezas
+  -- Desglose individual
+  ,SUM(CASE WHEN b.bDisp   = 1 THEN 1 ELSE 0 END)                              AS EtiquetasDisponibles
+  ,SUM(CASE WHEN b.bDisp   = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasDisponibles
+  ,SUM(CASE WHEN b.bRecib  = 1 THEN 1 ELSE 0 END)                              AS EtiquetasRecibidas
+  ,SUM(CASE WHEN b.bRecib  = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasRecibidas
+  ,SUM(CASE WHEN b.bTrans  = 1 THEN 1 ELSE 0 END)                              AS EtiquetasLiberadas
+  ,SUM(CASE WHEN b.bTrans  = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasLiberadas
+  ,SUM(CASE WHEN b.bInsp   = 1 THEN 1 ELSE 0 END)                              AS EtiquetasInspeccion
+  ,SUM(CASE WHEN b.bInsp   = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasInspeccion
+  ,SUM(CASE WHEN b.bRetrab = 1 THEN 1 ELSE 0 END)                              AS EtiquetasRetrabajo
+  ,SUM(CASE WHEN b.bRetrab = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasRetrabajo
 FROM cteBuckets b
 LEFT JOIN EPS.dbo.tblProceso p ON p.idProceso = b.idProceso
 GROUP BY b.idComp, b.idProceso, p.Nombre

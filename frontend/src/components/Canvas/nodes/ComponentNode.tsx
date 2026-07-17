@@ -1,8 +1,10 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 
+import { Tooltip } from "@/components/ui/Tooltip";
 import { useUiStore } from "@/store/useUiStore";
 import type { ComponentNodeData, Status } from "@/lib/buildGraph";
+import type { ReqUniverso } from "@/api/types";
 import { fmtInt } from "@/lib/format";
 import { PartThumbnail } from "./PartThumbnail";
 
@@ -50,11 +52,13 @@ type Props = NodeProps<Node<ComponentNodeData>>;
 
 export function ComponentNode({ data }: Props) {
   const mode = useUiStore((s) => s.mode);
-  // Card del intermedio:
-  //   inventario   -> piezas listas en el buffer Almacen WIP (wipBuffer)
-  //   requerimiento -> piezas que aun faltan para cubrir al padre (reqBufferFaltante)
-  const valor = mode === "inventario" ? data.wipBuffer : data.reqBufferFaltante;
-  const subLabel = mode === "inventario" ? "en buffer" : "por fabricar";
+  // Card del intermedio — los dos modos son complementarios sobre el MISMO
+  // universo de piezas (wipTotal + reqNeto cubren reqBruto):
+  //   inventario    -> wipTotal: todas las piezas del componente en piso, en
+  //     cualquier proceso de su ruta (incluido el buffer Almacen WIP).
+  //   requerimiento -> reqNeto: lo que falta fabricar, = max(0, reqBruto - wipTotal).
+  const valor = mode === "inventario" ? data.wipTotal : data.reqNeto;
+  const subLabel = mode === "inventario" ? "en piso" : "por fabricar";
 
   const ring = STATUS_RING[data.status];
   const badgeCls = STATUS_BADGE_BG[data.status];
@@ -131,12 +135,116 @@ export function ComponentNode({ data }: Props) {
           <PartThumbnail clave={data.clave} />
         </div>
 
-        {data.cantPadre > 1 ? (
-          <div className="flex justify-end mt-1">
-            <span className="text-[10px] text-ink-subtle tabular-nums">×{data.cantPadre}</span>
-          </div>
-        ) : null}
+        <div className="flex items-center justify-between gap-2 mt-1">
+          <CompartidoLegend reqUniverso={data.reqUniverso} mode={mode} />
+          {data.cantPadre > 1 ? (
+            <Tooltip
+              content={`Este componente lleva ${fmtInt(data.cantPadre)} piezas por cada unidad del PT.`}
+              side="bottom"
+            >
+              <span className="text-[10px] text-ink-subtle tabular-nums shrink-0 cursor-help">
+                ×{data.cantPadre}
+              </span>
+            </Tooltip>
+          ) : null}
+        </div>
       </div>
     </div>
+  );
+}
+
+/** Leyenda del componente compartido entre varios PTs.
+ *
+ * El numero grande de la card es el requerimiento del ARBOL ABIERTO; esta
+ * leyenda muestra el del UNIVERSO (todos los PTs con demanda que lo piden).
+ *
+ * Los dos numeros NO cuadran, y es correcto: el arbol se atribuye el 100% del
+ * WIP fisico del componente, mientras que el universo reparte ese mismo WIP
+ * entre todos los que lo reclaman. Por eso el tooltip lo advierte de forma
+ * explicita — si no, el planner leeria el WIP de la card como si fuera suyo.
+ */
+function CompartidoLegend({
+  reqUniverso,
+  mode,
+}: {
+  reqUniverso: ReqUniverso | null;
+  mode: "inventario" | "requerimiento";
+}) {
+  // Solo aporta cuando el componente vive bajo mas de un PT: si es exclusivo de
+  // este arbol, el universo y el arbol dicen lo mismo y la leyenda seria ruido.
+  if (!reqUniverso || reqUniverso.n_pts <= 1) return null;
+
+  // En modo inventario NO se repite el numero: el WIP fisico es unico, asi que
+  // el total del universo es identico al `wipTotal` que ya muestra la card en
+  // grande. Lo que si aporta es avisar de que ese inventario esta disputado.
+  const esInventario = mode === "inventario";
+  const valor = esInventario ? reqUniverso.n_pts : reqUniverso.req_neto_total;
+  const etiqueta = esInventario ? "PTs lo piden" : "req. total";
+
+  const listado = reqUniverso.pts.slice(0, 8).join(", ");
+  const resto = reqUniverso.n_pts - Math.min(reqUniverso.pts.length, 8);
+
+  const tooltip = (
+    <div className="space-y-1.5">
+      <div className="font-semibold">
+        Compartido con {reqUniverso.n_pts} PTs
+      </div>
+      <div className="text-white/80">
+        Requerimiento total: {fmtInt(reqUniverso.req_neto_total)} pzs
+        {" · "}
+        WIP en piso: {fmtInt(reqUniverso.wip_total)} pzs
+      </div>
+      <div className="text-white/60">
+        {listado}
+        {resto > 0 ? ` y ${resto} más` : ""}
+      </div>
+      <div className="text-white/80 border-t border-white/20 pt-1">
+        {esInventario ? (
+          <>
+            Esas piezas <b>no están reservadas</b> para este árbol: los otros PTs
+            de la lista las reclaman con el mismo derecho.
+          </>
+        ) : (
+          <>
+            El número grande es lo que pide <b>este</b> PT, descontando todo el
+            WIP. Como ese WIP también lo reclaman los otros PTs, los dos números
+            no cuadran a propósito.
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <Tooltip content={tooltip} side="bottom">
+      <span className="nodrag inline-flex items-center gap-1 min-w-0 cursor-help rounded px-1 py-0.5 bg-status-pt/5 border border-status-pt/25 hover:bg-status-pt/10 transition">
+        <SharedIcon />
+        <span className="text-[10px] tabular-nums font-medium text-status-pt truncate">
+          {fmtInt(valor)}
+        </span>
+        <span className="text-[9px] text-ink-subtle truncate">{etiqueta}</span>
+      </span>
+    </Tooltip>
+  );
+}
+
+/** Icono de "compartido": un nodo que se bifurca hacia dos padres. */
+function SharedIcon() {
+  return (
+    <svg
+      viewBox="0 0 12 12"
+      className="w-[9px] h-[9px] shrink-0 text-status-pt"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="10" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="2" cy="2" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="2" r="1.2" fill="currentColor" stroke="none" />
+      <path d="M6 9V6M6 6L2 3M6 6l4-3" />
+    </svg>
   );
 }

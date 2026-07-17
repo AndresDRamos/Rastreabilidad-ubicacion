@@ -62,6 +62,37 @@ Si el PT tiene demanda activa para varios `(Cliente, Ciudad)` (caso común en CN
 
 Esto significa que **la card del PT raíz en el frontend siempre muestra un solo número**, aunque internamente la demanda venga de varios clientes. Si necesitas el breakdown por cliente, hay que cargarlo de `Q_detalle` antes de pasar por `construir_arbol`.
 
+### Semántica de `CantidadEnsamble` (regla dura — leer antes de tocar la pasada 1)
+
+**`tblBomExplosionado.CantidadEnsamble` viene ACUMULADA desde el PT raíz**, no es la cantidad local padre→hijo. Es "cuántas piezas del componente lleva UNA unidad del PT", con los factores de todos los niveles superiores ya multiplicados.
+
+Evidencia contra BD real (la arista `92691847-A → 92691848-A`, presente en 5 árboles):
+
+| PT raíz | `CantidadEnsamble` | del padre | local derivada |
+| --- | --- | --- | --- |
+| `92691818-A` | 6 | 3 | **2** |
+| `92691826-A` | 2 | 1 | **2** |
+| `92691827-A` | 2 | 1 | **2** |
+| `92691847-A` | 2 | 1 | **2** |
+| `92691857-A` | 6 | 3 | **2** |
+
+La columna cruda cambia según el árbol; **la local es invariante** — como corresponde a una propiedad del par padre-hijo. En las 4 728 filas del universo de demanda la división da entero exacto en el 100 % de los casos (0 fraccionarias, 0 divisores en cero, 0 padres huérfanos).
+
+El netteo **necesita la local**, porque ya propaga el factor del padre vía `req_neto[padre]`. `_cantidad_local(fb, cant_por_idbom, advertencias)` la deriva:
+
+```text
+local = CantidadEnsamble[fila hijo] / CantidadEnsamble[fila del padre]
+        ↑ el divisor sale de la fila con IdBom == IdBomParent del hijo
+```
+
+**Trampas al implementarlo**:
+
+- El divisor debe salir de la **fila exacta del padre** (`IdBom == IdBomParent`), NO de `cantidad_ensamble_total[padre]`: si el padre es shared, esa suma agrega sus varias apariciones (3+2=5) y corrompe la división.
+- `cantidad_ensamble_total` **conserva la acumulada a propósito** — es "piezas por unidad de PT" y bajo esa semántica sí significa algo. No convertirla a local.
+- `AristaPadre.cantidad_ensamble` sí viaja en **local** (es la cantidad de esa aparición concreta).
+
+**Historia**: hasta 2026-07 el algoritmo trataba la acumulada como local, re-aplicando el factor del padre en cada nivel. El error se componía hacia abajo y afectaba a **15 PTs / 59 nodos** (los que tienen un ancestro con cantidad > 1). Caso real: en el PT `92691818-A` (demanda 21) el componente `92691848-A` reportaba **918 piezas por fabricar** cuando el valor correcto es **0** — el WIP de su padre ya cubría la demanda. Fijado por `test_cantidad_ensamble_acumulada_se_convierte_a_local`. El caso canónico `91711066-RA` nunca se vio afectado porque todas sus cantidades son 1.
+
 ### Pasada 1 — top-down por orden topológico (Kahn)
 
 Itera componentes del PT raíz hacia las hojas:
@@ -71,8 +102,9 @@ req_bruto[PT_raíz] = demanda_total_del_PT  (suma sobre todos los Cliente/Ciudad
 
 para cada componente C en orden topológico:
     si C != PT_raíz:
-        req_bruto[C] = Σ ( req_neto[padre] * CantidadEnsamble )
+        req_bruto[C] = Σ ( req_neto[padre] * cantidad_LOCAL(padre → C) )
                        sobre TODAS las apariciones de C en el BOM
+                       ↑ LOCAL, no CantidadEnsamble cruda — ver sección anterior
     req_neto[C] = max(0, req_bruto[C] - wip_total[C])
 ```
 
@@ -86,7 +118,7 @@ Para cada componente C, los pasos de su ruta se procesan así:
 
 **(a) Agrupar por `idProceso`** preservando el orden de primera aparición. Si una ruta tiene 4 sub-pasos con `idProceso=6` (caso real: Soldadura Robot + Limpieza + Soldadura Manual + …), se colapsan en UN solo `PasoRuta`. Las `Ruta` (nombre detallado) se concatenan con ` / `. Esta agrupación es **obligatoria** porque `tblEtiqueta.idProcesoSiguiente` solo indexa por idProceso (no por idRuta), así que hay un único valor de WIP por (componente, idProceso). Si no agruparas, contarías el mismo WIP varias veces en la pasada inversa.
 
-**(b) Para intermedios**: agregar un `PasoRuta` virtual al final con `idProceso=almacen_wip_id (16)`, `es_virtual=True`. Representa el buffer donde el componente espera consumo por el padre. Su `wip_en_paso = wip[(idComp, 16)]` (bucket Por procesar). **No se renderiza como nodo** en el canvas; alimenta el `wipBuffer` de la card del componente.
+**(b) Para intermedios**: agregar un `PasoRuta` virtual al final con `idProceso=almacen_wip_id (16)`, `es_virtual=True`. Representa el buffer donde el componente espera consumo por el padre. Su `wip_en_paso = wip[(idComp, 16)]` (bucket Por procesar). **No se renderiza como nodo** en el canvas; su WIP entra en el `wip_total` que muestra la card del componente.
 
 **(c) Para el PT raíz**: NO agregar nodo virtual. El último paso del PT es típicamente Embarques (idProceso=13). La card del PT representa el estado final del producto.
 
@@ -148,9 +180,11 @@ PasoRuta(
 
 **En el frontend**:
 
-- `frontend/src/lib/buildGraph.ts` extrae `wipBuffer = ultimo_paso.wip_en_paso` cuando `es_virtual=true`.
-- `reqBufferFaltante = max(0, req_bruto - wipBuffer)` es lo que muestra la card en modo Requerimiento.
-- El paso virtual **no se renderiza como nodo visible** aunque el componente esté expandido — alimenta la card.
+- El paso virtual **no se renderiza como nodo visible** aunque el componente esté expandido.
+- **Ya no alimenta la card directamente**: desde 2026-07 la card del componente muestra `wip_total` (modo Inventario) y `req_neto` (modo Requerimiento). El WIP del buffer ya viene sumado dentro de `wip_total`, así que el dato no se pierde.
+- Sigue siendo parte del contrato del netteo: su `wip_en_paso` entra en `wip_total` (pasada 1) y en el acumulado downstream de `req_paso` (pasada 2). **Borrarlo cambiaría los números**, no solo la UI.
+
+> **Histórico**: hasta 2026-07 la card mostraba `wipBuffer` / `reqBufferFaltante = max(0, req_bruto - wipBuffer)`, que solo consideraban el buffer. Un componente con inventario de sobra en procesos intermedios reportaba piezas por fabricar mientras su badge decía "Cubierto" (caso real: `92691823-A`, con 249 pzs en piso, mostraba "0 en buffer" y "57 por fabricar" teniendo `req_neto = 0`). Ambos campos ya no existen en el frontend.
 
 ## Outliers operativos (advertencias)
 
@@ -214,6 +248,9 @@ Subconjunto de `EPS.dbo.tblProceso` que aparece en árboles típicos:
 | # | Trampa | Mitigación |
 | --- | --- | --- |
 | 16 | Mezclar buckets WIP en el netteo (sumar Liberadas o Inspección a la fórmula de `req_paso`). | El test `test_liberadas_e_inspeccion_no_afectan_req_paso` lo fija: solo `Piezas` (bucket Por procesar) entra al cálculo. |
+| 19 | **Tratar `CantidadEnsamble` como cantidad local.** Viene ACUMULADA desde el PT raíz; multiplicarla por `req_neto[padre]` re-aplica el factor y el error se compone por nivel (caso real: 918 piezas fantasma donde correspondían 0). | Derivar la local con `_cantidad_local` (divisor = fila con `IdBom == IdBomParent`, nunca `cantidad_ensamble_total[padre]`). Fijado por `test_cantidad_ensamble_acumulada_se_convierte_a_local`. Ver la sección "Semántica de CantidadEnsamble". |
+| 20 | En queries a nivel universo: sumar las aristas del BOM sin deduplicar. `tblBomExplosionado` repite cada relación padre→hijo una vez por árbol donde vive (4 724 filas → 4 477 aristas únicas). | `Q_universo_req.sql` agrega dentro de cada árbol y colapsa entre árboles con `MAX`. |
+| 21 | Sumar el `req_neto` de netteos por PT para obtener el requerimiento cross-PT: descuenta el mismo WIP físico una vez por cada PT que lo reclama. | Netteo global multi-raíz en `domain/universo_req.py`; el WIP se descuenta una sola vez. Fijado por `test_wip_compartido_se_descuenta_una_sola_vez`. |
 | 17 | Etiqueta ya remisionada pero `bActiva=1` aún. | `Q_detalle.sql` y `Q_bloques.sql` aplican `NOT EXISTS (SELECT 1 FROM vwEtiquetasEnRemision)` — la sola presencia en esa vista implica compromiso. |
 | 18 | UNION ALL en el CTE de buckets duplica filas si un proceso fuera a la vez "siguiente" y "último" para la misma etiqueta. | Por construcción no ocurre: si `idProcesoSiguiente = X` entonces el último proceso histórico ≠ X. Validado en `Q_detalle.sql`. |
 
@@ -232,13 +269,13 @@ Validado contra BD real y con el diagrama Excalidraw del usuario. Es el "regress
 
 **Card del componente** (modo Inventario, número grande):
 
-- `90358715-RA` card: `wipBuffer = 0` (las 4 piezas están en Doblez, no en el buffer)
-- `91711040-RA` card: `wipBuffer = 9`
+- `90358715-RA` card: `wip_total = 4` (las 4 piezas de Doblez cuentan aunque no estén en el buffer)
+- `91711040-RA` card: `wip_total = 9`
 
-**Card del componente** (modo Requerimiento):
+**Card del componente** (modo Requerimiento) — muestra `req_neto`, que descuenta **todo** el WIP del componente:
 
-- `90358715-RA` card: `reqBufferFaltante = 222 - 0 = 222`
-- `91711040-RA` card: `reqBufferFaltante = 222 - 9 = 213`
+- `90358715-RA` card: `req_neto = max(0, 222 - 4) = 218` (las 4 pzs de Doblez cuentan aunque no estén en el buffer)
+- `91711040-RA` card: `req_neto = max(0, 222 - 9) = 213`
 
 Este caso está cubierto explícitamente por:
 

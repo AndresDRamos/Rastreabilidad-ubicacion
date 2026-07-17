@@ -7,7 +7,7 @@ context manager global de conexion. La conexion la inyecta FastAPI via
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 import pyodbc
 
@@ -27,8 +27,10 @@ def _rows_to_dicts(cursor: pyodbc.Cursor) -> list[dict[str, Any]]:
 
 def fetch_listado(conn: pyodbc.Connection,
                   ventana_meses: int = 3,
-                  fecha_max: str | None = None) -> list[dict[str, Any]]:
+                  fecha_max: str | None = None,
+                  universo_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
     sql = _leer_sql("Q_listado.sql")
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
     cursor = conn.cursor()
     if fecha_max:
         # fecha_max viene validada como ISO yyyy-mm-dd desde el router (date).
@@ -80,10 +82,61 @@ def fetch_detalle(conn: pyodbc.Connection, idPT: int,
     return result_sets[0], result_sets[1], result_sets[2], result_sets[3]
 
 
+def fetch_universo_req(conn: pyodbc.Connection,
+                       ventana_meses: int = 3,
+                       fecha_max: str | None = None) -> tuple[
+                           list[dict[str, Any]],  # DEMANDA por PT
+                           list[dict[str, Any]],  # ARISTAS deduplicadas
+                           list[dict[str, Any]],  # WIP por componente
+                           list[dict[str, Any]],  # PTS_POR_COMP
+                       ]:
+    """Lee Q_universo_req (4 result-sets) para el netteo cross-PT del bosque.
+
+    Sin filtro de universo (Caterpillar): el requerimiento total de un
+    componente es un hecho fisico del piso — depende de TODA la demanda activa,
+    no de que pestana tenga abierta el usuario. Filtrarlo daria un total parcial
+    que se leeria como total real.
+    """
+    sql = _leer_sql("Q_universo_req.sql")
+    if fecha_max:
+        # fecha_max viene validada como ISO yyyy-mm-dd desde el router (date).
+        fecha_decl = f"DECLARE @fecha_max date = '{fecha_max}';\n"
+    else:
+        fecha_decl = "DECLARE @fecha_max date = NULL;\n"
+    sql_param = (
+        f"DECLARE @ventana_meses int = {int(ventana_meses)};\n"
+        + fecha_decl
+    ) + _strip_param_declarations(sql)
+
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    result_sets: list[list[dict[str, Any]]] = []
+    while True:
+        result_sets.append(_rows_to_dicts(cursor))
+        if not cursor.nextset():
+            break
+    cursor.close()
+
+    while len(result_sets) < 4:
+        result_sets.append([])
+    return result_sets[0], result_sets[1], result_sets[2], result_sets[3]
+
+
 def _decl_int(name: str, value: int | None) -> str:
     if value is None:
         return f"DECLARE @{name} int = NULL;\n"
     return f"DECLARE @{name} int = {int(value)};\n"
+
+
+def _clientes_predicate(ids: list[int] | None) -> str:
+    """Devuelve el predicado SQL a injectar en /*CLIENTES_FILTER*/.
+
+    Valida cada id como int para evitar SQL injection. Lista vacia o None
+    devuelve "" (no se filtra por cliente)."""
+    if not ids:
+        return ""
+    csv = ",".join(str(int(x)) for x in ids)
+    return f"AND d.idCliente IN ({csv})"
 
 
 def _ciudades_predicate(ids: list[int] | None) -> str:
@@ -119,21 +172,87 @@ def _clase_predicate(ids: list[int] | None) -> str:
     return f"AND I.CLASS_ID_ARTCULO_ID IN ({csv})"
 
 
+def _pt_universo_predicate(ids: Iterable[int] | None) -> str:
+    """Predicado SQL para /*PT_UNIVERSO_FILTER*/.
+
+    Acota el universo de PTs a `d.idMaterial IN (...)` (alias `d` = cteDem sobre
+    tblDemandaEPS). Lo usa el universo "Caterpillar Priority" (CSV de numeros
+    criticos). Cada id se castea a int como unica defensa anti-inyeccion. None o
+    vacio = sin filtro."""
+    if not ids:
+        return ""
+    csv = ",".join(str(int(x)) for x in ids)
+    return f"AND d.idMaterial IN ({csv})"
+
+
+def _cliente_eq_predicate(id_cliente: int | None) -> str:
+    """Predicado SQL para /*CLIENTE_FILTER*/ (detalle de una celda del
+    calendario). Acota a un unico cliente. int-validado. None = sin filtro."""
+    if id_cliente is None:
+        return ""
+    return f"AND d.idCliente = {int(id_cliente)}"
+
+
+def _ciudad_eq_predicate(id_ciudad: int | None) -> str:
+    """Predicado SQL para /*CIUDAD_FILTER*/ (detalle de una celda del
+    calendario). Acota a una unica ciudad. int-validado. None = sin filtro."""
+    if id_ciudad is None:
+        return ""
+    return f"AND d.idCiudad = {int(id_ciudad)}"
+
+
+def _fecha_rango_predicate(desde: str | None, hasta: str | None) -> str:
+    """Predicado SQL para /*FECHA_FILTER*/ (rango de un bucket del calendario).
+
+    `desde`/`hasta` vienen validados como ISO yyyy-mm-dd desde el router (tipo
+    date -> isoformat). `hasta` es EXCLUSIVO (limite superior abierto). Cualquiera
+    puede ser None: la columna past-due usa solo `hasta` (todo lo anterior a hoy).
+    """
+    parts: list[str] = []
+    if desde:
+        parts.append(f"AND d.Fecha >= '{desde}'")
+    if hasta:
+        parts.append(f"AND d.Fecha < '{hasta}'")
+    return " ".join(parts)
+
+
+def _forecast_predicate(incluye_forecast: bool) -> str:
+    """Predicado SQL para /*FORECAST_FILTER*/. Cuando NO se incluye forecast,
+    acota a bForecast = 0 (solo firme). Incluyendo forecast = sin filtro."""
+    if incluye_forecast:
+        return ""
+    return "AND d.bForecast = 0"
+
+
+def _destino_predicate(id_destino: int | None) -> str:
+    """Predicado SQL para /*DESTINO_FILTER*/ (detalle de una arista del Flujo).
+
+    Acota a etiquetas cuyo `idProcesoSiguiente` = destino. Solo tiene sentido con
+    bucket='PorTransferir' (origen X -> destino Y). None = sin filtro."""
+    if id_destino is None:
+        return ""
+    return f"AND e.idProcesoSiguiente = {int(id_destino)}"
+
+
 def fetch_bloques(conn: pyodbc.Connection,
-                  id_cliente: int | None = None,
+                  ids_cliente: list[int] | None = None,
                   id_planta: int | None = None,
                   ids_ciudad: list[int] | None = None,
                   ids_tipo_material: list[int] | None = None,
-                  ids_clase: list[int] | None = None) -> list[dict[str, Any]]:
+                  ids_clase: list[int] | None = None,
+                  universo_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
     """Lee Q_bloques.sql — bloques agregados por idProcesoSiguiente."""
     sql = _leer_sql("Q_bloques.sql")
+    sql = sql.replace("/*CLIENTES_FILTER*/", _clientes_predicate(ids_cliente))
     sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
     sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
     sql = sql.replace("/*CLASE_FILTER*/", _clase_predicate(ids_clase))
-    con_filtro = 1 if (id_cliente is not None or ids_ciudad or ids_clase) else 0
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
+    con_filtro = 1 if (
+        ids_cliente or ids_ciudad or ids_clase or universo_ids
+    ) else 0
     sql_param = (
-        _decl_int("idCliente", id_cliente)
-        + _decl_int("idPlantaFiltro", id_planta)
+        _decl_int("idPlantaFiltro", id_planta)
         + f"DECLARE @conFiltroUniverso bit = {con_filtro};\n"
     ) + _strip_param_declarations(sql)
     cursor = conn.cursor()
@@ -145,19 +264,21 @@ def fetch_bloques(conn: pyodbc.Connection,
 
 def fetch_pts_en_proceso(conn: pyodbc.Connection,
                          id_proceso: int,
-                         id_cliente: int | None = None,
+                         ids_cliente: list[int] | None = None,
                          id_planta: int | None = None,
                          ids_ciudad: list[int] | None = None,
                          ids_tipo_material: list[int] | None = None,
-                         ids_clase: list[int] | None = None) -> list[dict[str, Any]]:
+                         ids_clase: list[int] | None = None,
+                         universo_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
     """Lee Q_pts_en_proceso.sql — PTs cuyos componentes esperan @id_proceso."""
     sql = _leer_sql("Q_pts_en_proceso.sql")
+    sql = sql.replace("/*CLIENTES_FILTER*/", _clientes_predicate(ids_cliente))
     sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
     sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
     sql = sql.replace("/*CLASE_FILTER*/", _clase_predicate(ids_clase))
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
     sql_param = (
         _decl_int("idProcesoSelected", id_proceso)
-        + _decl_int("idCliente", id_cliente)
         + _decl_int("idPlantaFiltro", id_planta)
     ) + _strip_param_declarations(sql)
     cursor = conn.cursor()
@@ -167,11 +288,176 @@ def fetch_pts_en_proceso(conn: pyodbc.Connection,
     return rows
 
 
+def fetch_etiquetas_detalle(conn: pyodbc.Connection,
+                            id_proceso: int,
+                            bucket: str,
+                            ids_cliente: list[int] | None = None,
+                            id_planta: int | None = None,
+                            ids_ciudad: list[int] | None = None,
+                            ids_tipo_material: list[int] | None = None,
+                            ids_clase: list[int] | None = None,
+                            universo_ids: Iterable[int] | None = None,
+                            id_destino: int | None = None) -> list[dict[str, Any]]:
+    """Lee Q_etiquetas_detalle.sql — etiquetas que componen el bucket dado."""
+    sql = _leer_sql("Q_etiquetas_detalle.sql")
+    sql = sql.replace("/*CLIENTES_FILTER*/", _clientes_predicate(ids_cliente))
+    sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
+    sql = sql.replace("/*CLASE_FILTER*/", _clase_predicate(ids_clase))
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
+    # DESTINO_FILTER solo aplica a 'PorTransferir' (acota idProcesoSiguiente=Y).
+    # 'Encaminadas' usa @idDestino dentro de su propia rama (via ruta), no aqui.
+    destino_filter = _destino_predicate(id_destino) if bucket == "PorTransferir" else ""
+    sql = sql.replace("/*DESTINO_FILTER*/", destino_filter)
+    con_filtro = 1 if (
+        ids_cliente or ids_ciudad or ids_clase or universo_ids
+    ) else 0
+    # bucket viene validado contra una whitelist en el router.
+    bucket_lit = bucket.replace("'", "''")
+    sql_param = (
+        _decl_int("idProcesoSelected", id_proceso)
+        + f"DECLARE @bucket varchar(20) = '{bucket_lit}';\n"
+        + _decl_int("idPlantaFiltro", id_planta)
+        + _decl_int("idDestino", id_destino)
+        + f"DECLARE @conFiltroUniverso bit = {con_filtro};\n"
+    ) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
+def fetch_flujo(conn: pyodbc.Connection,
+                ids_cliente: list[int] | None = None,
+                id_planta: int | None = None,
+                ids_ciudad: list[int] | None = None,
+                ids_tipo_material: list[int] | None = None,
+                ids_clase: list[int] | None = None,
+                universo_ids: Iterable[int] | None = None) -> tuple[
+                    list[dict[str, Any]],  # BLOQUES
+                    list[dict[str, Any]],  # ARISTAS
+                ]:
+    """Lee Q_flujo.sql — grafo de procesos conectados (2 result-sets).
+
+    La estructura sale de las rutas de fabricacion del universo; el WIP se
+    sobrepone. Devuelve (bloques, aristas)."""
+    sql = _leer_sql("Q_flujo.sql")
+    sql = sql.replace("/*CLIENTES_FILTER*/", _clientes_predicate(ids_cliente))
+    sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
+    sql = sql.replace("/*CLASE_FILTER*/", _clase_predicate(ids_clase))
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
+    sql_param = _decl_int("idPlantaFiltro", id_planta) + _strip_param_declarations(sql)
+
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    result_sets: list[list[dict[str, Any]]] = []
+    while True:
+        result_sets.append(_rows_to_dicts(cursor))
+        if not cursor.nextset():
+            break
+    cursor.close()
+
+    # Esperamos 2 result-sets en orden BLOQUES, ARISTAS.
+    while len(result_sets) < 2:
+        result_sets.append([])
+    return result_sets[0], result_sets[1]
+
+
+def fetch_flujo_plantas(conn: pyodbc.Connection,
+                        ids_cliente: list[int] | None = None,
+                        ids_ciudad: list[int] | None = None,
+                        ids_tipo_material: list[int] | None = None,
+                        ids_clase: list[int] | None = None,
+                        universo_ids: Iterable[int] | None = None) -> tuple[
+                            list[dict[str, Any]],  # NODOS (planta)
+                            list[dict[str, Any]],  # ARISTAS (interplanta)
+                        ]:
+    """Lee Q_flujo_plantas.sql — overview nivel planta (2 result-sets).
+
+    Un nodo por planta (WIP interno total) y aristas Planta A -> Planta B. NO
+    acepta @idPlantaFiltro: el overview muestra todas las plantas. Devuelve
+    (nodos, aristas)."""
+    sql = _leer_sql("Q_flujo_plantas.sql")
+    sql = sql.replace("/*CLIENTES_FILTER*/", _clientes_predicate(ids_cliente))
+    sql = sql.replace("/*CIUDADES_FILTER*/", _ciudades_predicate(ids_ciudad))
+    sql = sql.replace("/*TIPOMAT_FILTER*/", _tipomat_predicate(ids_tipo_material))
+    sql = sql.replace("/*CLASE_FILTER*/", _clase_predicate(ids_clase))
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
+    sql_param = _strip_param_declarations(sql)
+
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    result_sets: list[list[dict[str, Any]]] = []
+    while True:
+        result_sets.append(_rows_to_dicts(cursor))
+        if not cursor.nextset():
+            break
+    cursor.close()
+
+    # Esperamos 2 result-sets en orden NODOS, ARISTAS.
+    while len(result_sets) < 2:
+        result_sets.append([])
+    return result_sets[0], result_sets[1]
+
+
 def fetch_plantas(conn: pyodbc.Connection) -> list[dict[str, Any]]:
     """Lee Q_plantas.sql — lista de plantas con WIP activo."""
     sql = _leer_sql("Q_plantas.sql")
     cursor = conn.cursor()
     cursor.execute(sql)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
+def fetch_requerimiento_calendario(conn: pyodbc.Connection,
+                                   ventana_meses: int = 3,
+                                   fecha_max: str | None = None,
+                                   universo_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
+    """Lee Q_requerimiento_calendario.sql — demanda desagregada por fecha.
+
+    Una fila por (PT x Cliente x Ciudad x Fecha[dia] x bForecast). El frontend
+    bucketiza y filtra cliente/ciudad/forecast client-side (mismo patron que
+    fetch_listado)."""
+    sql = _leer_sql("Q_requerimiento_calendario.sql")
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
+    if fecha_max:
+        # fecha_max viene validada como ISO yyyy-mm-dd desde el router (date).
+        fecha_decl = f"DECLARE @fecha_max date = '{fecha_max}';\n"
+    else:
+        fecha_decl = "DECLARE @fecha_max date = NULL;\n"
+    sql_param = (
+        f"DECLARE @ventana_meses int = {int(ventana_meses)};\n"
+        + fecha_decl
+    ) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
+def fetch_orden_detalle(conn: pyodbc.Connection,
+                        id_material: int,
+                        id_cliente: int | None = None,
+                        id_ciudad: int | None = None,
+                        fecha_desde: str | None = None,
+                        fecha_hasta: str | None = None,
+                        incluye_forecast: bool = False) -> list[dict[str, Any]]:
+    """Lee Q_orden_detalle.sql — lineas de demanda de una celda del calendario.
+
+    `fecha_hasta` es EXCLUSIVO. `fecha_desde` None = past-due (todo antes de
+    `fecha_hasta`). Cliente/ciudad None = sin filtro (celda sin cliente/ciudad)."""
+    sql = _leer_sql("Q_orden_detalle.sql")
+    sql = sql.replace("/*CLIENTE_FILTER*/", _cliente_eq_predicate(id_cliente))
+    sql = sql.replace("/*CIUDAD_FILTER*/", _ciudad_eq_predicate(id_ciudad))
+    sql = sql.replace("/*FECHA_FILTER*/", _fecha_rango_predicate(fecha_desde, fecha_hasta))
+    sql = sql.replace("/*FORECAST_FILTER*/", _forecast_predicate(incluye_forecast))
+    sql_param = _decl_int("idMaterial", id_material) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
     rows = _rows_to_dicts(cursor)
     cursor.close()
     return rows
@@ -186,11 +472,14 @@ def _strip_param_declarations(sql: str) -> str:
         stripped = line.strip().lower()
         if stripped.startswith("declare @ventana_meses") \
            or stripped.startswith("declare @idpt") \
+           or stripped.startswith("declare @idmaterial") \
            or stripped.startswith("declare @fecha_max") \
            or stripped.startswith("declare @idplantafiltro") \
            or stripped.startswith("declare @idprocesoselected") \
            or stripped.startswith("declare @idcliente") \
-           or stripped.startswith("declare @confiltrouniverso"):
+           or stripped.startswith("declare @iddestino") \
+           or stripped.startswith("declare @confiltrouniverso") \
+           or stripped.startswith("declare @bucket"):
             continue
         keep.append(line)
     return "\n".join(keep)

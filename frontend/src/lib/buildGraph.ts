@@ -8,7 +8,7 @@
 
 import type { Edge, Node } from "@xyflow/react";
 
-import type { ArbolPT, NodoComponente, PasoRuta } from "@/api/types";
+import type { ArbolPT, NodoComponente, PasoRuta, ReqUniverso } from "@/api/types";
 
 export type Status = "pt" | "covered" | "partial" | "empty" | "neutral";
 
@@ -40,11 +40,9 @@ export interface ComponentNodeData extends Record<string, unknown> {
   reqBruto: number;
   wipTotal: number;
   reqNeto: number;
-  // Valores derivados para la card segun modo.
-  // inventario  -> wipBuffer (piezas en el buffer Almacen WIP virtual)
-  // requerimiento -> reqBufferFaltante = max(0, reqBruto - wipBuffer)
-  wipBuffer: number;
-  reqBufferFaltante: number;
+  // La card usa `wipTotal` (inventario) y `reqNeto` (requerimiento): dos vistas
+  // complementarias del mismo universo de piezas. El PasoRuta virtual
+  // (Almacen WIP) ya no alimenta la card — su WIP ya viene sumado en wipTotal.
   cadenaRuta: string;
   ultimoPaso: PasoRuta | null;
   status: Status;
@@ -52,6 +50,8 @@ export interface ComponentNodeData extends Record<string, unknown> {
   expanded: boolean;
   /** Total de piezas requeridas por ensamble del padre (suma de todas las aristas padre). */
   cantPadre: number;
+  /** Requerimiento del componente a traves de TODOS los PTs con demanda. */
+  reqUniverso: ReqUniverso | null;
 }
 
 export interface ProcessNodeData extends Record<string, unknown> {
@@ -64,12 +64,21 @@ export interface ProcessNodeData extends Record<string, unknown> {
   ordenEnRuta: number;
   totalPasos: number;
   reqPaso: number;
-  wipEnPaso: number;             // bucket "Por procesar" (alimenta netteo)
+  // wipEnPaso = disponibles + recibidas (alimenta netteo)
+  wipEnPaso: number;
   etiquetasEnPaso: number;
-  liberadas: number;             // ya salieron del proceso (display)
+  // Desglose display del WIP que aun debe pasar por X
+  disponibles: number;
+  etiquetasDisponibles: number;
+  recibidas: number;
+  etiquetasRecibidas: number;
+  // Salidas de X (solo display)
+  liberadas: number;             // ya salieron del proceso (PorTransferir)
   etiquetasLiberadas: number;
-  enInspeccion: number;          // en QC del proceso (display)
+  enInspeccion: number;          // QC del proceso
   etiquetasInspeccion: number;
+  retrabajo: number;             // por retrabajo del proceso
+  etiquetasRetrabajo: number;
   highlighted: boolean;
 }
 
@@ -173,9 +182,6 @@ export function buildGraph(
     if (c.idComp === idPt) continue;
 
     const ultimoPasoReal = [...c.ruta].reverse().find((p) => !p.es_virtual) ?? null;
-    const buffer = c.ruta.find((p) => p.es_virtual) ?? null;
-    const wipBuffer = buffer?.wip_en_paso ?? 0;
-    const reqBufferFaltante = Math.max(0, c.req_bruto - wipBuffer);
     const pasosReales = c.ruta.filter((p) => !p.es_virtual);
 
     nodes.push({
@@ -191,14 +197,13 @@ export function buildGraph(
         reqBruto: c.req_bruto,
         wipTotal: c.wip_total,
         reqNeto: c.req_neto,
-        wipBuffer,
-        reqBufferFaltante,
         cadenaRuta: c.cadena_ruta,
         ultimoPaso: ultimoPasoReal,
         status: statusDeComponente(c, ultimoPasoReal),
         expandable: pasosReales.length > 0,
         expanded: expanded.has(c.idComp),
         cantPadre: c.cantidad_ensamble_total,
+        reqUniverso: c.req_universo,
       },
     });
   }
@@ -235,10 +240,16 @@ export function buildGraph(
           reqPaso: paso.req_paso,
           wipEnPaso: paso.wip_en_paso,
           etiquetasEnPaso: paso.etiquetas_en_paso,
+          disponibles: paso.disponibles,
+          etiquetasDisponibles: paso.etiquetas_disponibles,
+          recibidas: paso.recibidas,
+          etiquetasRecibidas: paso.etiquetas_recibidas,
           liberadas: paso.liberadas,
           etiquetasLiberadas: paso.etiquetas_liberadas,
           enInspeccion: paso.en_inspeccion,
           etiquetasInspeccion: paso.etiquetas_inspeccion,
+          retrabajo: paso.retrabajo,
+          etiquetasRetrabajo: paso.etiquetas_retrabajo,
           highlighted: isHighlighted,
         },
       });
