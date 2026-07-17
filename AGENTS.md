@@ -117,7 +117,7 @@ cd backend
 ## Estado del proyecto
 
 - M1–M7 del plan original completados y validados.
-- Extras posteriores ya consolidados en `master`:
+- Extras posteriores ya consolidados en `main`:
   - **Vista Resumen** con bloques por `idProcesoSiguiente`, drill-down al árbol y filtros globales (cliente, planta, ciudades, tipo de material, clase NetSuit). Es la tab por defecto al abrir la app.
   - **WIP en 3 buckets** por proceso: Por procesar (alimenta el netteo), Liberadas (display) y En Inspección (display). El `ProcessNode` los muestra simultáneamente en una grilla 3×1.
   - **Multi-cliente PT**: si un PT tiene demanda activa para varios (cliente × ciudad), el algoritmo consolida en una sola card del PT raíz con la suma de demandas.
