@@ -40,10 +40,9 @@ export interface ComponentNodeData extends Record<string, unknown> {
   reqBruto: number;
   wipTotal: number;
   reqNeto: number;
-  // Valor de la card en modo inventario: piezas en el buffer Almacen WIP
-  // virtual (las que ya terminaron toda su ruta y esperan al padre).
-  // En modo requerimiento la card usa `reqNeto`.
-  wipBuffer: number;
+  // La card usa `wipTotal` (inventario) y `reqNeto` (requerimiento): dos vistas
+  // complementarias del mismo universo de piezas. El PasoRuta virtual
+  // (Almacen WIP) ya no alimenta la card — su WIP ya viene sumado en wipTotal.
   cadenaRuta: string;
   ultimoPaso: PasoRuta | null;
   status: Status;
@@ -183,8 +182,6 @@ export function buildGraph(
     if (c.idComp === idPt) continue;
 
     const ultimoPasoReal = [...c.ruta].reverse().find((p) => !p.es_virtual) ?? null;
-    const buffer = c.ruta.find((p) => p.es_virtual) ?? null;
-    const wipBuffer = buffer?.wip_en_paso ?? 0;
     const pasosReales = c.ruta.filter((p) => !p.es_virtual);
 
     nodes.push({
@@ -200,7 +197,6 @@ export function buildGraph(
         reqBruto: c.req_bruto,
         wipTotal: c.wip_total,
         reqNeto: c.req_neto,
-        wipBuffer,
         cadenaRuta: c.cadena_ruta,
         ultimoPaso: ultimoPasoReal,
         status: statusDeComponente(c, ultimoPasoReal),

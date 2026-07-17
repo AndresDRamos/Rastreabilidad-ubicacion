@@ -124,8 +124,8 @@ cd backend
   - **Vista Flujo** (`GET /api/flujo` → `Q_flujo.sql`): grafo de procesos conectados (un bloque por `proceso × planta`, aristas `origen → destino`). La **estructura** sale de las rutas de fabricación (`tblMaterialRutaTiempo` + `LEAD`), incluye bloques/aristas **en cero**, y el WIP se **sobrepone** (LEFT JOIN). Toggle "Tarjetas ⇄ Flujo" en la cabecera del Resumen. `Disponibles(Y)` dentro del bloque = Σ aristas entrantes; la arista X→Y = `PorTransferir` de X hacia Y.
   - **Universo "Caterpillar Priority"** (param `universo=caterpillar`): pestaña en el sidebar que acota listado + bloques + flujo a los `idMaterial` de `NumerosCriticos.csv` (raíz del repo). El backend lo lee con `domain/universos.py` (cache por mtime) e inyecta `/*PT_UNIVERSO_FILTER*/` en `cteDem` de cada query.
 - Validado visualmente contra BD real con el **PT canónico 91711066-RA** (CNH Industrial, Hood W Rear Engine, 222 piezas pendientes):
-  - `90358715-RA` muestra `Doblez (4 de 218)` en modo Requerimiento y `0 en buffer` en modo Inventario.
-  - `91711040-RA` muestra `Nivelado (0 de 213)` y `9 en buffer`.
+  - `90358715-RA` muestra `Doblez (4 de 218)` en modo Requerimiento y `4 en piso` en modo Inventario.
+  - `91711040-RA` muestra `Nivelado (0 de 213)` y `9 en piso`.
 
 ## Reglas para agentes (lee antes de cambiar código)
 
@@ -145,7 +145,7 @@ cd backend
    - `["etiquetas-detalle", universo, idProceso, bucket, destino, cliente, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
    - `["plantas"]` — `staleTime: 10 min`.
 7. **Si tocas `backend/src/rbom_api/domain/modelo.py`, replica en `frontend/src/api/types.ts`** — es el espejo TypeScript y no hay validación cruzada automática. Idea futura: generar con `openapi-typescript` desde `/openapi.json`.
-8. **Antes de borrar un PasoRuta virtual** lee `backend/docs/algoritmo-netteo.md` — el buffer virtual (`Almacen WIP`, idProceso=16) es parte del contrato y alimenta el valor de la card del componente.
+8. **Antes de borrar un PasoRuta virtual** lee `backend/docs/algoritmo-netteo.md` — el buffer virtual (`Almacen WIP`, idProceso=16) es parte del contrato del netteo: su `wip_en_paso` entra en `wip_total` y en el acumulado downstream de `req_paso`. Ya no alimenta la card directamente (desde 2026-07 muestra `wip_total` / `req_neto`), pero borrarlo **cambiaría los números**, no solo la UI.
 9. **Solo el bucket "Por procesar" alimenta el netteo**. `liberadas` y `en_inspeccion` son display puro. Si introduces una nueva métrica desde el WIP, decide explícitamente si descuenta demanda y refleja la decisión en `domain/netteo.py` + un test que la fije.
 9-bis. **`tblBomExplosionado.CantidadEnsamble` viene ACUMULADA desde el PT raíz**, no es local padre→hijo. El netteo la convierte con `_cantidad_local` (divisor = fila con `IdBom == IdBomParent`, **nunca** `cantidad_ensamble_total[padre]`). Tratarla como local re-aplica el factor del padre en cada nivel — bug real que reportaba 918 piezas donde correspondían 0. Ver `backend/docs/algoritmo-netteo.md` § "Semántica de CantidadEnsamble".
 9-ter. **No sumes el `req_neto` de netteos por PT** para obtener un requerimiento cross-PT: descuenta el mismo WIP una vez por cada PT que lo reclama (576 de 6,113 componentes son compartidos). El netteo global multi-raíz vive en `domain/universo_req.py`. El requerimiento del árbol abierto y el del universo **no cuadran a propósito** — el árbol se atribuye el 100% del WIP; el universo lo reparte. La UI lo advierte en la leyenda del nodo compartido.

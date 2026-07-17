@@ -34,7 +34,8 @@ Lo que depende del modo:
 
 | Campo | mode = "inventario" | mode = "requerimiento" |
 | --- | --- | --- |
-| Número grande | `wipBuffer` ("en buffer") | `reqNeto` ("por fabricar") |
+| Número grande | `wipTotal` ("en piso") | `reqNeto` ("por fabricar") |
+| `CompartidoLegend` (solo si vive bajo >1 PT) | `n_pts` ("PTs lo piden") | `req_neto_total` ("req. total") |
 
 Lo que es independiente del modo:
 
@@ -44,11 +45,13 @@ Lo que es independiente del modo:
 
 Donde:
 
-- `wipBuffer = ultimoPasoVirtual.wip_en_paso` (las piezas en el `Almacen WIP` del componente, listas para consumo por el padre).
-- `reqNeto = max(0, reqBruto - wipTotal)` (cuántas piezas faltan realmente, descontando **todo** el WIP del componente). Debe ser consistente con el badge: `reqNeto = 0` ⇔ "Cubierto".
+- `wipTotal` = todas las piezas del componente en piso, en cualquier proceso de su ruta (incluido el buffer `Almacen WIP`).
+- `reqNeto = max(0, reqBruto - wipTotal)` (cuántas piezas faltan realmente). Debe ser consistente con el badge: `reqNeto = 0` ⇔ "Cubierto".
+- Los dos modos son **complementarios** sobre el mismo universo de piezas: `wipTotal + reqNeto = reqBruto` (salvo exceso de inventario, donde `reqNeto` se satura en 0).
+- La leyenda de compartido **no repite el número grande**: en Inventario muestra `n_pts` en vez del WIP del universo, porque el WIP físico es único y su total coincide siempre con `wipTotal`.
 - `cantPadre = cantidad_ensamble_total` del componente (suma sobre todas las aristas padre). Antes vivía como label en el edge; se movió a la card para reducir ruido visual cuando el árbol crece.
 
-> **No volver a `reqBufferFaltante = max(0, reqBruto - wipBuffer)`** (el comportamiento hasta 2026-07): solo descontaba el buffer, así que un componente con inventario de sobra en procesos intermedios mostraba piezas por fabricar mientras su badge decía "Cubierto".
+> **No volver a `wipBuffer` / `reqBufferFaltante = max(0, reqBruto - wipBuffer)`** (el comportamiento hasta 2026-07): solo miraban el buffer `Almacen WIP`, así que un componente con inventario de sobra en procesos intermedios mostraba "0 en buffer" y "57 por fabricar" mientras su badge decía "Cubierto" y su `req_neto` era 0.
 
 ### `ProcessNode` (`frontend/src/components/Canvas/nodes/ProcessNode.tsx`)
 

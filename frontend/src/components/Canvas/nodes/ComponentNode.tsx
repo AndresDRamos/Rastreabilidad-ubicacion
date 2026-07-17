@@ -52,13 +52,13 @@ type Props = NodeProps<Node<ComponentNodeData>>;
 
 export function ComponentNode({ data }: Props) {
   const mode = useUiStore((s) => s.mode);
-  // Card del intermedio:
-  //   inventario    -> piezas listas en el buffer Almacen WIP (wipBuffer)
-  //   requerimiento -> req_neto: lo que realmente falta fabricar de este
-  //     componente para el arbol abierto, descontando TODO su WIP (en cualquier
-  //     proceso), no solo el del buffer.
-  const valor = mode === "inventario" ? data.wipBuffer : data.reqNeto;
-  const subLabel = mode === "inventario" ? "en buffer" : "por fabricar";
+  // Card del intermedio — los dos modos son complementarios sobre el MISMO
+  // universo de piezas (wipTotal + reqNeto cubren reqBruto):
+  //   inventario    -> wipTotal: todas las piezas del componente en piso, en
+  //     cualquier proceso de su ruta (incluido el buffer Almacen WIP).
+  //   requerimiento -> reqNeto: lo que falta fabricar, = max(0, reqBruto - wipTotal).
+  const valor = mode === "inventario" ? data.wipTotal : data.reqNeto;
+  const subLabel = mode === "inventario" ? "en piso" : "por fabricar";
 
   const ring = STATUS_RING[data.status];
   const badgeCls = STATUS_BADGE_BG[data.status];
@@ -174,11 +174,12 @@ function CompartidoLegend({
   // este arbol, el universo y el arbol dicen lo mismo y la leyenda seria ruido.
   if (!reqUniverso || reqUniverso.n_pts <= 1) return null;
 
-  const valor =
-    mode === "inventario"
-      ? reqUniverso.wip_total
-      : reqUniverso.req_neto_total;
-  const etiqueta = mode === "inventario" ? "en piso (total)" : "req. total";
+  // En modo inventario NO se repite el numero: el WIP fisico es unico, asi que
+  // el total del universo es identico al `wipTotal` que ya muestra la card en
+  // grande. Lo que si aporta es avisar de que ese inventario esta disputado.
+  const esInventario = mode === "inventario";
+  const valor = esInventario ? reqUniverso.n_pts : reqUniverso.req_neto_total;
+  const etiqueta = esInventario ? "PTs lo piden" : "req. total";
 
   const listado = reqUniverso.pts.slice(0, 8).join(", ");
   const resto = reqUniverso.n_pts - Math.min(reqUniverso.pts.length, 8);
@@ -198,9 +199,18 @@ function CompartidoLegend({
         {resto > 0 ? ` y ${resto} más` : ""}
       </div>
       <div className="text-white/80 border-t border-white/20 pt-1">
-        El número grande es lo que pide <b>este</b> PT. Ese WIP también lo
-        reclaman los otros PTs de la lista, así que no está reservado para este
-        árbol.
+        {esInventario ? (
+          <>
+            Esas piezas <b>no están reservadas</b> para este árbol: los otros PTs
+            de la lista las reclaman con el mismo derecho.
+          </>
+        ) : (
+          <>
+            El número grande es lo que pide <b>este</b> PT, descontando todo el
+            WIP. Como ese WIP también lo reclaman los otros PTs, los dos números
+            no cuadran a propósito.
+          </>
+        )}
       </div>
     </div>
   );

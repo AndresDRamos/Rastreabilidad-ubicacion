@@ -118,7 +118,7 @@ Para cada componente C, los pasos de su ruta se procesan así:
 
 **(a) Agrupar por `idProceso`** preservando el orden de primera aparición. Si una ruta tiene 4 sub-pasos con `idProceso=6` (caso real: Soldadura Robot + Limpieza + Soldadura Manual + …), se colapsan en UN solo `PasoRuta`. Las `Ruta` (nombre detallado) se concatenan con ` / `. Esta agrupación es **obligatoria** porque `tblEtiqueta.idProcesoSiguiente` solo indexa por idProceso (no por idRuta), así que hay un único valor de WIP por (componente, idProceso). Si no agruparas, contarías el mismo WIP varias veces en la pasada inversa.
 
-**(b) Para intermedios**: agregar un `PasoRuta` virtual al final con `idProceso=almacen_wip_id (16)`, `es_virtual=True`. Representa el buffer donde el componente espera consumo por el padre. Su `wip_en_paso = wip[(idComp, 16)]` (bucket Por procesar). **No se renderiza como nodo** en el canvas; alimenta el `wipBuffer` de la card del componente.
+**(b) Para intermedios**: agregar un `PasoRuta` virtual al final con `idProceso=almacen_wip_id (16)`, `es_virtual=True`. Representa el buffer donde el componente espera consumo por el padre. Su `wip_en_paso = wip[(idComp, 16)]` (bucket Por procesar). **No se renderiza como nodo** en el canvas; su WIP entra en el `wip_total` que muestra la card del componente.
 
 **(c) Para el PT raíz**: NO agregar nodo virtual. El último paso del PT es típicamente Embarques (idProceso=13). La card del PT representa el estado final del producto.
 
@@ -180,11 +180,11 @@ PasoRuta(
 
 **En el frontend**:
 
-- `frontend/src/lib/buildGraph.ts` extrae `wipBuffer = ultimo_paso.wip_en_paso` cuando `es_virtual=true`. Es lo que muestra la card en modo **Inventario** ("en buffer").
-- En modo **Requerimiento** la card muestra `req_neto` — lo que realmente falta fabricar, descontando **todo** el WIP del componente (en cualquier proceso), no solo el del buffer.
-- El paso virtual **no se renderiza como nodo visible** aunque el componente esté expandido — alimenta la card.
+- El paso virtual **no se renderiza como nodo visible** aunque el componente esté expandido.
+- **Ya no alimenta la card directamente**: desde 2026-07 la card del componente muestra `wip_total` (modo Inventario) y `req_neto` (modo Requerimiento). El WIP del buffer ya viene sumado dentro de `wip_total`, así que el dato no se pierde.
+- Sigue siendo parte del contrato del netteo: su `wip_en_paso` entra en `wip_total` (pasada 1) y en el acumulado downstream de `req_paso` (pasada 2). **Borrarlo cambiaría los números**, no solo la UI.
 
-> **Histórico**: hasta 2026-07 la card mostraba `reqBufferFaltante = max(0, req_bruto - wipBuffer)`, que solo descontaba el buffer. Un componente con inventario de sobra en procesos intermedios reportaba piezas por fabricar mientras su badge decía "Cubierto" (caso real: `92691823-A` con 249 pzs en piso mostraba "57 por fabricar" y `req_neto = 0`). El campo ya no existe.
+> **Histórico**: hasta 2026-07 la card mostraba `wipBuffer` / `reqBufferFaltante = max(0, req_bruto - wipBuffer)`, que solo consideraban el buffer. Un componente con inventario de sobra en procesos intermedios reportaba piezas por fabricar mientras su badge decía "Cubierto" (caso real: `92691823-A`, con 249 pzs en piso, mostraba "0 en buffer" y "57 por fabricar" teniendo `req_neto = 0`). Ambos campos ya no existen en el frontend.
 
 ## Outliers operativos (advertencias)
 
@@ -269,8 +269,8 @@ Validado contra BD real y con el diagrama Excalidraw del usuario. Es el "regress
 
 **Card del componente** (modo Inventario, número grande):
 
-- `90358715-RA` card: `wipBuffer = 0` (las 4 piezas están en Doblez, no en el buffer)
-- `91711040-RA` card: `wipBuffer = 9`
+- `90358715-RA` card: `wip_total = 4` (las 4 piezas de Doblez cuentan aunque no estén en el buffer)
+- `91711040-RA` card: `wip_total = 9`
 
 **Card del componente** (modo Requerimiento) — muestra `req_neto`, que descuenta **todo** el WIP del componente:
 
