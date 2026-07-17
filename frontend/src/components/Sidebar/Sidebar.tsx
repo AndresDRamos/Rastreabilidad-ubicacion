@@ -2,7 +2,6 @@ import { useState } from "react";
 import { CalendarioPanel } from "./CalendarioPanel";
 import { FiltersHeader } from "./FiltersHeader";
 import { PtTable } from "./PtTable";
-import { UniversoTabs } from "./UniversoTabs";
 import { useUiStore } from "@/store/useUiStore";
 
 function CalendarIcon() {
@@ -105,7 +104,6 @@ export function Sidebar() {
           onToggleExpand={toggleExpanded}
           onCollapse={() => setCollapsed(true)}
         />
-        <UniversoTabs />
         <FiltersHeader />
         <PtTable />
       </div>
@@ -118,7 +116,6 @@ export function Sidebar() {
             onToggleExpand={toggleExpanded}
             onCollapse={() => setCollapsed(true)}
           />
-          <UniversoTabs />
           <FiltersHeader />
           <CalendarioPanel />
         </div>
