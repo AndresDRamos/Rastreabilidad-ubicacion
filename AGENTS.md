@@ -70,6 +70,7 @@ Rastreabilidad-app/
 | Agregar un placeholder de filtro a un query | `backend/docs/conventions.md` (sección placeholders) → `backend/src/rbom_api/domain/db.py` (`_*_predicate` + `_strip_param_declarations`) |
 | Modificar el algoritmo de netteo | `backend/docs/algoritmo-netteo.md` (obligatorio) → `backend/src/rbom_api/domain/netteo.py` → `backend/tests/unit/test_netteo.py` |
 | Tocar el requerimiento cross-PT (leyenda del nodo compartido) | `backend/docs/algoritmo-netteo.md` (§ CantidadEnsamble) → `backend/src/rbom_api/domain/universo_req.py` + `sql/Q_universo_req.sql` → `services/arbol_service.py` (`req_universo`, cache TTL) → `frontend/src/components/Canvas/nodes/ComponentNode.tsx` (`CompartidoLegend`) |
+| Tocar la exportación a Excel | `backend/src/rbom_api/services/export_service.py` (definiciones de "Total WIP" / "Total completos") → `routers/export.py` → `backend/tests/unit/test_export.py` → `frontend/src/components/Tabs.tsx` (`ExportButton`) |
 | Agregar un endpoint | `backend/docs/architecture.md` → `backend/docs/conventions.md` → `backend/src/rbom_api/routers/*.py` (mirar `pts.py` o `bloques.py` según necesites cache simple o multi-filtro) → `backend/src/rbom_api/main.py` para registrarlo |
 | Cambiar modelo pydantic | `backend/src/rbom_api/domain/modelo.py` → `frontend/src/api/types.ts` (replicar) → `frontend/docs/conventions.md` |
 | Variables de entorno | `backend/src/rbom_api/config.py` → `backend/.env.example` |
@@ -151,6 +152,7 @@ cd backend
 10. **Si agregas un parámetro `DECLARE` nuevo a una `.sql`**, agrégalo al stripping de `_strip_param_declarations` en `backend/src/rbom_api/domain/db.py`, o SQL Server fallará con `variable already declared`.
 11. **Los placeholders `/*FILTRO*/` en las SQL del Resumen se reemplazan por string-substitution**: los `_*_predicate` de `db.py` validan cada id como `int(...)` antes de armar el `IN (...)`. Si agregas un placeholder nuevo, sigue ese patrón y NO concatenes strings del usuario directamente.
 12. **Los feedback de carga**: no dejar como primer estado un "0", ni un estado en blanco como inicial, sobretodo si es un número que aún está esperando los cálculos, utilizar un componente de carga.
+13. **Las columnas consolidadas del Excel son definiciones de negocio, no cálculos libres.** Viven en `services/export_service.py` y las fija `tests/unit/test_export.py`: *Total WIP* = `wip_total` (para un kit, unidades ya ensambladas = kits completos en piso); *Total completos* = **mínimo** del WIP entre los procesos de fabricación de la ruta, excluyendo `PROCESOS_NO_FABRICACION` (Embarques=13 y Almacen WIP=16, que no transforman la pieza); *Requerimiento neto* = `req_neto`. Si cambias una definición, cambia su test — el planner toma decisiones de producción con esas columnas.
 
 ## Convenciones de los documentos
 
