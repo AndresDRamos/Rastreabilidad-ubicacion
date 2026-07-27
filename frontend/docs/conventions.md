@@ -14,7 +14,9 @@
 | `usePtsEnProceso(...)` | `GET /api/bloques/{id}/pts` | `["pts-en-proceso", idProceso, cliente, planta, ciudadesKey, tiposKey, clasesKey]` | 2 min | Mismo razonamiento que bloques. |
 | `usePlantas()` | `GET /api/plantas` | `["plantas"]` | 10 min | Catálogo casi estático. |
 | `useRequerimientoCalendario(ventana, fechaMax, universo)` | `GET /api/requerimiento/calendario` | `["requerimiento-cal", universo, ventana, fechaMaxParam ?? null]` | 5 min | Espeja `usePts` — mismo dataset de demanda, solo que desagregado por fecha. Alimenta `CalendarioPanel`; granularidad/forecast/cliente/ciudad se resuelven client-side sobre el mismo result-set. |
-| `useOrdenDetalle(idMaterial, cliente, ciudad, desde, hasta, forecast)` | `GET /api/requerimiento/orden-detalle` | `["orden-detalle", idMaterial, cliente, ciudad, desde, hasta, forecast]` | 2 min | Popover de detalle de una celda del calendario; `enabled: idMaterial !== null`. |
+| `useOrdenDetalle(idMaterial, cliente, ciudad, desde, hasta, forecast)` | `GET /api/requerimiento/orden-detalle` | `["orden-detalle", idMaterial, cliente, ciudad, desde, hasta, forecast]` | 2 min | Popover de detalle de una celda del calendario (lado requerimiento); `enabled: idMaterial !== null`. |
+| `useEmbarquesCalendario(mesesAtras, universo)` | `GET /api/requerimiento/embarques` | `["embarques-cal", universo, mesesAtras]` | 5 min | Fase 2. Espeja `useRequerimientoCalendario` hacia el pasado — historial de remisiones desagregado por fecha. Alimenta la mitad izquierda del eje de `CalendarioPanel`; cliente/ciudad/pt se resuelven client-side. |
+| `useRemisionDetalle(idMaterial, cliente, ciudad, desde, hasta)` | `GET /api/requerimiento/remision-detalle` | `["remision-detalle", idMaterial, cliente, ciudad, desde, hasta]` | 2 min | Fase 2. Espeja `useOrdenDetalle` — popover de detalle de una celda de embarque (líneas de remisión); `enabled: idMaterial !== null`. |
 
 Reglas para mantener consistencia con el backend:
 

@@ -51,11 +51,37 @@ export interface OrdenLinea {
   PrecioUnitario: number | null;
 }
 
+// Espejo de CeldaEmbarque (Q_embarques_calendario.sql): historial de embarques
+// desagregado por (PT x Cliente x Ciudad x Fecha[dia]). Se pinta a la IZQUIERDA
+// de la columna Past-due.
+export interface CeldaEmbarque {
+  idMaterial: number;
+  PT: string;
+  Descripcion: string;
+  idCliente: number | null;
+  Cliente: string;
+  idCiudad: number | null;
+  Ciudad: string;
+  Fecha: string; // ISO date (dia)
+  PiezasEmbarcadas: number;
+}
+
+// Una linea de remision que compone una celda de embarque (popover de detalle).
+export interface RemisionLinea {
+  Remision: string | null;
+  Factura: string | null;
+  OrdenVenta: string | null;
+  OrdenCompra: string | null;
+  Fecha: string; // ISO date
+  Piezas: number;
+  PrecioUnitario: number | null;
+}
+
 // Granularidad del eje de tiempo del calendario.
 export type CalGranularidad = "dia" | "semana" | "mes";
 
-// Modo del panel calendario. Corte 1 solo implementa "requerimiento"; "embarques"
-// / "ambos" quedan reservados para la fase 2 (historial de embarques).
+// Modo del panel calendario: "requerimiento" (demanda futura, derecha),
+// "embarques" (historial, izquierda) o "ambos" (default fase 2).
 export type CalModo = "requerimiento" | "embarques" | "ambos";
 
 export interface DemandaPT {

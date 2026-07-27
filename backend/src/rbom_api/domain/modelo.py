@@ -66,6 +66,38 @@ class OrdenLinea(_Base):
     PrecioUnitario: Optional[float] = None
 
 
+class CeldaEmbarque(_Base):
+    """Una fila del result-set de Q_embarques_calendario.sql.
+
+    Historial de embarques (remisiones) desagregado por (PT x Cliente x Ciudad x
+    Fecha[dia]). Espejo hacia el PASADO de CeldaCalendario: el frontend agrupa
+    por (idMaterial, idCliente, idCiudad) y bucketiza `Fecha` a dia/semana/mes,
+    pintandolo a la IZQUIERDA de la columna Past-due. `PiezasEmbarcadas` =
+    SUM(vwRemisiones.CantidadRemision).
+    """
+    idMaterial: int
+    PT: str
+    Descripcion: str
+    idCliente: Optional[int] = None
+    Cliente: str
+    idCiudad: Optional[int] = None
+    Ciudad: str
+    Fecha: date
+    PiezasEmbarcadas: float
+
+
+class RemisionLinea(_Base):
+    """Una linea de remision que compone una celda de embarque (popover de
+    detalle). Sale de Q_remision_detalle.sql."""
+    Remision: Optional[str] = None
+    Factura: Optional[str] = None
+    OrdenVenta: Optional[str] = None
+    OrdenCompra: Optional[str] = None
+    Fecha: date
+    Piezas: float
+    PrecioUnitario: Optional[float] = None
+
+
 class DemandaPT(_Base):
     idMaterial: int
     PT: str

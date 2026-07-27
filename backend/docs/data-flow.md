@@ -16,6 +16,8 @@
 | `GET /api/plantas` | `db.fetch_plantas` directo | `Q_plantas.sql` | TTL 600s, maxsize 1 | TanStack staleTime 10 min |
 | `GET /api/requerimiento/calendario?ventana=&fecha_max=&universo=` | `db.fetch_requerimiento_calendario` directo | `Q_requerimiento_calendario.sql` | TTL 300s, maxsize 32, key=(universo, ventana, fecha_max) | TanStack staleTime 5 min |
 | `GET /api/requerimiento/orden-detalle?idMaterial=&cliente=&ciudad=&desde=&hasta=&forecast=` | `db.fetch_orden_detalle` directo | `Q_orden_detalle.sql` | TTL 120s, maxsize 256 | TanStack staleTime 2 min |
+| `GET /api/requerimiento/embarques?meses_atras=&universo=` | `db.fetch_embarques_calendario` directo | `Q_embarques_calendario.sql` | TTL 300s, maxsize 32, key=(universo, meses_atras) | TanStack staleTime 5 min |
+| `GET /api/requerimiento/remision-detalle?idMaterial=&cliente=&ciudad=&desde=&hasta=` | `db.fetch_remision_detalle` directo | `Q_remision_detalle.sql` | TTL 120s, maxsize 256 | TanStack staleTime 2 min |
 
 Nota: los endpoints del Resumen llaman directo a `db.*` sin pasar por `services/` porque no hay netteo ni transformación de dominio que justifique una capa extra. Si en el futuro agregas lógica de negocio sobre `BloqueProceso`, crea `services/bloques_service.py` y mueve la llamada ahí — el patrón está pensado para crecer en esa dirección.
 
@@ -152,13 +154,16 @@ sql_param = (
 Si no quitara los `DECLARE` originales del SQL, SQL Server tiraría `"The variable name '@x' has already been declared"`. El helper `_strip_param_declarations` elimina específicamente las líneas que arrancan con (case-insensitive):
 
 - `declare @ventana_meses`
+- `declare @meses_atras` (fase 2 — `Q_embarques_calendario.sql`)
 - `declare @idpt`
 - `declare @idmaterial`
 - `declare @fecha_max`
 - `declare @idplantafiltro`
 - `declare @idprocesoselected`
 - `declare @idcliente`
+- `declare @iddestino`
 - `declare @confiltrouniverso`
+- `declare @bucket`
 
 **Si agregas un nuevo parámetro a un query**, actualiza el helper para que lo strippee también. Si te lo saltas, los tests no lo detectan (son sintéticos): lo detectarás solo al ejecutar contra BD real.
 

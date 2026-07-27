@@ -463,6 +463,48 @@ def fetch_orden_detalle(conn: pyodbc.Connection,
     return rows
 
 
+def fetch_embarques_calendario(conn: pyodbc.Connection,
+                               meses_atras: int = 12,
+                               universo_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
+    """Lee Q_embarques_calendario.sql — remisiones desagregadas por fecha.
+
+    Una fila por (PT x Cliente x Ciudad x Fecha[dia]). Espejo hacia el pasado de
+    fetch_requerimiento_calendario: el frontend bucketiza y filtra cliente/
+    ciudad/pt client-side sobre el result-set (sin re-fetch)."""
+    sql = _leer_sql("Q_embarques_calendario.sql")
+    sql = sql.replace("/*PT_UNIVERSO_FILTER*/", _pt_universo_predicate(universo_ids))
+    sql_param = (
+        f"DECLARE @meses_atras int = {int(meses_atras)};\n"
+    ) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
+def fetch_remision_detalle(conn: pyodbc.Connection,
+                           id_material: int,
+                           id_cliente: int | None = None,
+                           id_ciudad: int | None = None,
+                           fecha_desde: str | None = None,
+                           fecha_hasta: str | None = None) -> list[dict[str, Any]]:
+    """Lee Q_remision_detalle.sql — lineas de remision de una celda de embarque.
+
+    `fecha_hasta` es EXCLUSIVO. Cliente/ciudad None = sin filtro (celda sin
+    cliente/ciudad). Espejo hacia el pasado de fetch_orden_detalle."""
+    sql = _leer_sql("Q_remision_detalle.sql")
+    sql = sql.replace("/*CLIENTE_FILTER*/", _cliente_eq_predicate(id_cliente))
+    sql = sql.replace("/*CIUDAD_FILTER*/", _ciudad_eq_predicate(id_ciudad))
+    sql = sql.replace("/*FECHA_FILTER*/", _fecha_rango_predicate(fecha_desde, fecha_hasta))
+    sql_param = _decl_int("idMaterial", id_material) + _strip_param_declarations(sql)
+    cursor = conn.cursor()
+    cursor.execute(sql_param)
+    rows = _rows_to_dicts(cursor)
+    cursor.close()
+    return rows
+
+
 def _strip_param_declarations(sql: str) -> str:
     """Quita los DECLARE @... del SQL para evitar redeclaraciones,
     manteniendo el uso de las variables en el batch."""
@@ -471,6 +513,7 @@ def _strip_param_declarations(sql: str) -> str:
     for line in lines:
         stripped = line.strip().lower()
         if stripped.startswith("declare @ventana_meses") \
+           or stripped.startswith("declare @meses_atras") \
            or stripped.startswith("declare @idpt") \
            or stripped.startswith("declare @idmaterial") \
            or stripped.startswith("declare @fecha_max") \

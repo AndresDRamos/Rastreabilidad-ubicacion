@@ -6,6 +6,7 @@ import type {
   BloqueBucket,
   BloqueProceso,
   CeldaCalendario,
+  CeldaEmbarque,
   EtiquetaDetalle,
   FilaListado,
   FlujoPlantasResponse,
@@ -13,6 +14,7 @@ import type {
   OrdenLinea,
   Planta,
   PTEnProceso,
+  RemisionLinea,
   Universo,
 } from "./types";
 
@@ -361,6 +363,56 @@ export function useOrdenDetalle(
       if (forecast) params.forecast = true;
       const { data } = await apiClient.get<OrdenLinea[]>(
         "/requerimiento/orden-detalle",
+        { params },
+      );
+      return data;
+    },
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+// Historial de embarques (fase 2 del calendario). Igual que useRequerimientoCalendario:
+// los mismos params server-side (universo, meses_atras). Cliente/ciudad/pt/
+// granularidad se resuelven client-side sobre el result-set, sin re-fetch.
+export function useEmbarquesCalendario(
+  mesesAtras: number = 12,
+  universo: Universo = "general",
+) {
+  return useQuery<CeldaEmbarque[]>({
+    queryKey: ["embarques-cal", universo, mesesAtras],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { meses_atras: mesesAtras };
+      if (universo !== "general") params.universo = universo;
+      const { data } = await apiClient.get<CeldaEmbarque[]>(
+        "/requerimiento/embarques",
+        { params },
+      );
+      return data;
+    },
+    staleTime: 5 * 60 * 1000, // 5 min — espeja TTL backend (como /calendario)
+  });
+}
+
+// Detalle de una celda de embarque: lineas de remision. desde=null => sin piso
+// inferior (todo lo anterior a hasta). Solo corre con idMaterial != null.
+export function useRemisionDetalle(
+  idMaterial: number | null,
+  cliente: number | null = null,
+  ciudad: number | null = null,
+  desde: string | null = null,
+  hasta: string | null = null,
+) {
+  return useQuery<RemisionLinea[]>({
+    queryKey: ["remision-detalle", idMaterial, cliente, ciudad, desde, hasta],
+    enabled: idMaterial !== null,
+    queryFn: async () => {
+      const params: Record<string, string | number> = { idMaterial: idMaterial! };
+      if (cliente != null) params.cliente = cliente;
+      if (ciudad != null) params.ciudad = ciudad;
+      if (desde) params.desde = desde;
+      if (hasta) params.hasta = hasta;
+      const { data } = await apiClient.get<RemisionLinea[]>(
+        "/requerimiento/remision-detalle",
         { params },
       );
       return data;

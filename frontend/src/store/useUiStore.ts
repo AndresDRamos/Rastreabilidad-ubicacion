@@ -45,10 +45,12 @@ export interface BloqueDetalleOpen {
 }
 
 /**
- * Celda del calendario de requerimiento seleccionada (popover de detalle de
- * orden de venta). null = ninguna abierta.
+ * Celda del calendario seleccionada (popover de detalle). null = ninguna
+ * abierta. `tipo` decide qué detalle se consulta: "requerimiento" -> órdenes de
+ * venta (lado derecho); "embarque" -> líneas de remisión (lado izquierdo).
  */
 export interface CeldaDetalleOpen {
+  tipo: "requerimiento" | "embarque";
   idMaterial: number;
   PT: string;
   idCliente: number | null;
@@ -170,7 +172,7 @@ export const useUiStore = create<UiStore>((set) => ({
   sidebarExpanded: false,
   calGranularidad: "semana",
   calIncluyeForecast: false,
-  calModo: "requerimiento",
+  calModo: "ambos",
   celdaDetalle: null,
 
   mode: "inventario",
