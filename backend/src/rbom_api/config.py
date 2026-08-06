@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     eps_server: str = "192.168.4.5"
     eps_database: str = "EPS"
     eps_user: str = "audit_agent"
-    eps_password: str = ""
+    # Credencial canonica del workspace EZI (EPS_SQL_PASSWORD, definida una vez por
+    # maquina con setx); EPS_PASSWORD queda como fallback para .env legados.
+    eps_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("EPS_SQL_PASSWORD", "EPS_PASSWORD"),
+    )
     eps_driver: str = "ODBC Driver 17 for SQL Server"
     eps_timeout: int = 120
 
