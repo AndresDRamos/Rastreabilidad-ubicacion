@@ -10,11 +10,64 @@ import type {
   Universo,
 } from "@/api/types";
 
+/** Alcance temporal de la demanda. Reemplaza al filtro de fecha libre: son los
+ *  cuatro cortes que responden preguntas distintas del piso.
+ *
+ *  Medido 2026-08-03 sobre la demanda viva y sobre lo que el piso procesa en la
+ *  semana en curso (ver, en ezi-data-core, activos/RastreabilidadBOM/decisiones.md):
+ *  - `pastdue`  251,447 pzs — la deuda vencida, 100% urgente.
+ *  - `4sem`     621,419 pzs — cubre el 95.6% de lo que el piso corre ESTA semana.
+ *  - `3meses` 1,597,390 pzs — cubre el 100% de lo que corre esta semana. Default.
+ *  - `anio`   el resto del año en curso — el pipeline completo.
+ *
+ *  OJO: el corte es por fecha de PROMESA, no de proceso. El piso trabaja con
+ *  anticipacion (solo el 14.6% de lo que corre esta semana se embarca esta
+ *  semana), asi que acotar a "la semana actual" esconderia el 85% del trabajo en
+ *  curso. Por eso el preset mas corto es 4 semanas y no una.
+ */
+export type Alcance = "pastdue" | "4sem" | "3meses" | "anio";
+
+export const ALCANCES: { id: Alcance; label: string; ayuda: string }[] = [
+  { id: "pastdue", label: "Past-due", ayuda: "Solo lo ya vencido" },
+  { id: "4sem", label: "4 semanas", ayuda: "Cubre el 95% de lo que el piso corre esta semana" },
+  { id: "3meses", label: "3 meses", ayuda: "Cubre el 100% de lo que corre esta semana" },
+  { id: "anio", label: "Todo el año", ayuda: "Hasta el 31 de diciembre" },
+];
+
+/** Traduce el alcance a los parametros que entiende la API (`ventana` en meses y
+ *  `fecha_max`). El SQL usa `ISNULL(@fecha_max, @techo)`, asi que cuando hay
+ *  fecha_max esa manda y `ventana` es inerte. */
+export function paramsDeAlcance(a: Alcance): { ventana: number; fechaMax: string } {
+  const hoy = new Date();
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+  switch (a) {
+    case "pastdue": {
+      const ayer = new Date(hoy);
+      ayer.setDate(ayer.getDate() - 1);
+      return { ventana: 1, fechaMax: iso(ayer) };
+    }
+    case "4sem": {
+      const d = new Date(hoy);
+      d.setDate(d.getDate() + 28);
+      return { ventana: 1, fechaMax: iso(d) };
+    }
+    case "3meses":
+      return { ventana: 3, fechaMax: "" };
+    case "anio":
+      return { ventana: 12, fechaMax: iso(new Date(hoy.getFullYear(), 11, 31)) };
+  }
+}
+
 export interface UiFilters {
   clienteIds: number[];        // [] = todos los clientes. Multi-select.
   ciudadIds: number[];         // [] = todas las ciudades. Multi-select.
   ptIds: number[];             // [] = todos los numeros de parte. Multi-select (idMaterial).
-  fechaMax: string;            // ISO yyyy-mm-dd; "" = sin filtro
+  // Derivado de `alcance` — ya NO es editable a mano. Se conserva en filters
+  // porque es lo que viaja a la API y a las queryKeys.
+  fechaMax: string;            // ISO yyyy-mm-dd; "" = sin techo extra
   plantaId: number | null;     // null = todas las plantas
   tipoMaterialIds: number[];   // [] = sin filtro (PT + Intermedio). PT=1, Intermedio=3.
   claseIds: number[];          // [] = sin filtro. Aplica solo a Resumen (Q_bloques / Q_pts_en_proceso).
@@ -79,7 +132,10 @@ interface UiStore {
   // Tabs / seleccion
   selectedPtIds: number[];           // orden = orden de tabs
   activeTabId: number | null;
-  ventana: number;                   // meses de ventana (default 3)
+  // Alcance temporal activo. `ventana` y `filters.fechaMax` se DERIVAN de el via
+  // paramsDeAlcance y no se setean por separado.
+  alcance: Alcance;
+  ventana: number;                   // meses de ventana (derivado de `alcance`)
 
   // Filtro por proceso (drill-down desde Resumen). null = sin filtro.
   procesoFiltro: ProcesoFiltro | null;
@@ -151,6 +207,7 @@ interface UiStore {
   setCalIncluyeForecast: (v: boolean) => void;
   setCalModo: (m: CalModo) => void;
   setCeldaDetalle: (c: CeldaDetalleOpen | null) => void;
+  setAlcance: (a: Alcance) => void;
   clearSelection: () => void;
 }
 
@@ -158,6 +215,7 @@ export const useUiStore = create<UiStore>((set) => ({
   view: "summary",
   selectedPtIds: [],
   activeTabId: null,
+  alcance: "3meses",
   ventana: 3,
   procesoFiltro: null,
   drilldownMetric: "disponibles",
@@ -243,6 +301,14 @@ export const useUiStore = create<UiStore>((set) => ({
     set((s) => ({ filters: { ...s.filters, [key]: value } })),
 
   setVentana: (v) => set({ ventana: v }),
+
+  // Cambiar el alcance reescribe ventana Y fechaMax a la vez: son dos caras del
+  // mismo corte y separarlas fue lo que permitia estados incoherentes.
+  setAlcance: (a) =>
+    set((s) => {
+      const { ventana, fechaMax } = paramsDeAlcance(a);
+      return { alcance: a, ventana, filters: { ...s.filters, fechaMax } };
+    }),
   setProcesoFiltro: (p) => set({ procesoFiltro: p }),
   setDrilldownMetric: (m) => set({ drilldownMetric: m }),
   setBloqueDetalle: (d) => set({ bloqueDetalle: d }),

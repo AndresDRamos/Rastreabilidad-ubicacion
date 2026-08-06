@@ -164,8 +164,13 @@ def _tipomat_predicate(ids: list[int] | None) -> str:
 def _clase_predicate(ids: list[int] | None) -> str:
     """Predicado SQL para /*CLASE_FILTER*/.
 
-    Filtra por I.CLASS_ID_ARTCULO_ID (alias `I` = NETSUITE.dbo.ITEMS JOINed en
-    el cteDem). Lista vacia o None = sin filtro."""
+    Filtra por I.CLASS_ID_ARTCULO_ID (alias `I` = cteClase, dedup de
+    EPS.dbo.vwClassIDMaterial JOINed en el cteDem por las TRES llaves
+    idMaterial/idCliente/idCiudad). Lista vacia o None = sin filtro.
+
+    Doctrina ezi-data-core (docs/fuentes/demanda.md): la clase NetSuit NO es
+    global del item — el mismo material tiene clase distinta por cliente/ciudad,
+    y la vista admite >1 fila por las 3 llaves (de ahi el dedup en el CTE)."""
     if not ids:
         return ""
     csv = ",".join(str(int(x)) for x in ids)

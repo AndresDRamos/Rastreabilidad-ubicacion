@@ -36,10 +36,14 @@ DECLARE @cutoff        date = ISNULL(@fecha_max, @techo);
 -- (1) DEMANDA agregada por PT raiz ---------------------------------------------
 -- Sin desglose por cliente/ciudad: para el netteo cross-PT solo importa el
 -- total por PT. Past-due incluido (sin piso de fecha).
+-- FechaPromMin es la llave del reparto FIFO: los PT se sirven del inventario
+-- compartido en orden de urgencia, el mas vencido primero (misma regla que el
+-- CLR de cobertura y que el activo `plan-capacidad`). Ver universo_req.py.
 SELECT
    d.idMaterial
   ,m.ClaveMaterial                              AS PT
   ,SUM(d.Cantidad - ISNULL(d.Embarcado, 0))     AS PiezasPend
+  ,MIN(CAST(d.Fecha AS date))                   AS FechaPromMin
 FROM
   EPS.dbo.tblDemandaEPS d
   JOIN EPS.dbo.tblMaterial m ON d.idMaterial = m.idMaterial
@@ -131,7 +135,12 @@ FROM EPS.Produccion.tblEtiqueta e
   LEFT JOIN EPS.Produccion.tblUbicacion u ON e.idUbicacion = u.idUbicacion
 WHERE e.bActiva            = 1
   AND e.idTipoEtiqueta     = 3              -- LIBERACION
-  AND e.idEstatusEtiqueta  = 2              -- LIBERADO
+  -- [2026-08-03] Se sumo el estatus 1 (POR INSPECCION) al pool del netteo, igual
+  -- que en Q_detalle.sql: la huella FIFO del CLR muestra que aporta el 4% de las
+  -- asignaciones reales con 99.5% de acierto. Sin esto, el netteo del universo y
+  -- el del arbol descontarian pools distintos. Ver ezi-data-core
+  -- activos/RastreabilidadBOM/decisiones.md (D-06).
+  AND e.idEstatusEtiqueta IN (1, 2)         -- POR INSPECCION / LIBERADO
   AND e.idProcesoSiguiente IS NOT NULL      -- aun debe pasar por algun proceso
   AND e.idMaterial IN (SELECT IdComponent FROM cteCompUniverso)
   AND NOT EXISTS (

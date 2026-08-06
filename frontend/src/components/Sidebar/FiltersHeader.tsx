@@ -1,15 +1,47 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePts } from "@/api/queries";
-import { useUiStore } from "@/store/useUiStore";
+import { ALCANCES, useUiStore } from "@/store/useUiStore";
 import { CiudadMultiSelect } from "./CiudadMultiSelect";
 import { ClaseMultiSelect } from "./ClaseMultiSelect";
 import { ClienteMultiSelect } from "./ClienteMultiSelect";
 import { NumeroParteMultiSelect } from "./NumeroParteMultiSelect";
 
+/** Alcance temporal de la demanda: cuatro cortes fijos en vez de una fecha libre.
+ *  El corte es por fecha de PROMESA. Ver el comentario de `Alcance` en el store
+ *  para por que el preset mas corto es 4 semanas y no la semana en curso. */
+function AlcanceSelector() {
+  const alcance = useUiStore((s) => s.alcance);
+  const setAlcance = useUiStore((s) => s.setAlcance);
+  return (
+    <div>
+      <span className="block text-xs text-ink-muted mb-1">Alcance del requerimiento</span>
+      <div className="grid grid-cols-2 gap-1">
+        {ALCANCES.map((a) => {
+          const activo = a.id === alcance;
+          return (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => setAlcance(a.id)}
+              title={a.ayuda}
+              aria-pressed={activo}
+              className={`h-9 px-2 text-xs font-medium rounded-md border transition focus:outline-none focus:ring-2 focus:ring-status-pt/30 ${
+                activo
+                  ? "border-status-pt/50 bg-status-pt/10 text-status-pt"
+                  : "border-surface-border bg-white text-ink-muted hover:bg-surface-subtle hover:text-ink"
+              }`}
+            >
+              {a.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function FiltersHeader() {
-  const filters = useUiStore((s) => s.filters);
-  const setFilter = useUiStore((s) => s.setFilter);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -77,28 +109,7 @@ export function FiltersHeader() {
           <CiudadMultiSelect />
           <ClaseMultiSelect />
           <NumeroParteMultiSelect />
-          <div>
-            <label className="flex items-center justify-between text-xs text-ink-muted mb-1">
-              <span>Fecha promesa hasta</span>
-              {filters.fechaMax ? (
-                <button
-                  type="button"
-                  onClick={() => setFilter("fechaMax", "")}
-                  className="text-status-pt hover:underline focus:outline-none"
-                >
-                  limpiar
-                </button>
-              ) : null}
-            </label>
-            <input
-              type="date"
-              value={filters.fechaMax}
-              onChange={(e) => setFilter("fechaMax", e.target.value)}
-              className={`w-full h-9 px-3 text-sm rounded-md border border-surface-border bg-white focus:outline-none focus:ring-2 focus:ring-status-pt/30 focus:border-status-pt/50 transition ${
-                filters.fechaMax ? "text-ink" : "text-ink-subtle"
-              }`}
-            />
-          </div>
+          <AlcanceSelector />
         </div>
       ) : null}
     </div>
@@ -138,6 +149,7 @@ function Chevron({ up }: { up: boolean }) {
 function useFilterBadges(): Badge[] {
   const ventana = useUiStore((s) => s.ventana);
   const fechaMax = useUiStore((s) => s.filters.fechaMax);
+  const alcance = useUiStore((s) => s.alcance);
   const clienteIds = useUiStore((s) => s.filters.clienteIds);
   const ciudadIds = useUiStore((s) => s.filters.ciudadIds);
   const claseIds = useUiStore((s) => s.filters.claseIds);
@@ -205,10 +217,13 @@ function useFilterBadges(): Badge[] {
         value: names.join(", "),
       });
     }
-    if (fechaMax) {
-      badges.push({ label: "Fecha hasta", value: fechaMax });
+    // El alcance siempre esta puesto; solo cuenta como "filtro activo" cuando se
+    // aparta del default de 3 meses.
+    if (alcance !== "3meses") {
+      const a = ALCANCES.find((x) => x.id === alcance);
+      badges.push({ label: "Alcance", value: a?.label ?? alcance });
     }
 
     return badges;
-  }, [filas, clienteIds, ciudadIds, claseIds, ptIds, fechaMax]);
+  }, [filas, clienteIds, ciudadIds, claseIds, ptIds, alcance]);
 }

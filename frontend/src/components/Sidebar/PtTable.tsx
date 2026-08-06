@@ -248,19 +248,32 @@ function PtRow({
   checked: boolean;
   onToggle: () => void;
 }) {
+  // La demanda sin material catalogado en EPS cuenta piezas pero no tiene BOM ni
+  // ruta: abrirle un arbol daria un lienzo vacio, asi que la fila no es
+  // seleccionable. Ver bSinMaterial en api/types.ts.
+  const sinArbol = fila.bSinMaterial;
   return (
     <li>
       <button
         type="button"
-        onClick={onToggle}
-        className={`w-full text-left px-4 py-2.5 hover:bg-surface-subtle transition focus:outline-none focus:bg-surface-subtle ${
-          checked ? "bg-status-pt/5" : ""
-        }`}
+        onClick={sinArbol ? undefined : onToggle}
+        disabled={sinArbol}
+        title={
+          sinArbol
+            ? "Demanda sin material catalogado en EPS: cuenta piezas, pero no tiene BOM ni ruta."
+            : undefined
+        }
+        className={`w-full text-left px-4 py-2.5 transition focus:outline-none ${
+          sinArbol
+            ? "cursor-not-allowed opacity-70"
+            : "hover:bg-surface-subtle focus:bg-surface-subtle"
+        } ${checked ? "bg-status-pt/5" : ""}`}
       >
         <div className="flex items-start gap-3">
           <input
             type="checkbox"
             checked={checked}
+            disabled={sinArbol}
             readOnly
             className="mt-1 h-4 w-4 rounded border-surface-border text-status-pt accent-status-pt"
           />
@@ -269,6 +282,11 @@ function PtRow({
             <div className="font-mono text-sm font-medium text-ink truncate">
               {fila.PT}
             </div>
+            {sinArbol ? (
+              <div className="text-[11px] text-status-empty mt-0.5">
+                sin material en EPS · sin BOM
+              </div>
+            ) : null}
             <div className="flex items-center gap-1 text-xs mt-0.5">
               <span
                 className="text-ink-muted truncate min-w-0 flex-1"

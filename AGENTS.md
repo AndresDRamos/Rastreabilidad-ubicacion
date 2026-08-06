@@ -22,6 +22,41 @@ Stack:
 - Frontend: **React 18.3 + @xyflow/react 12 + Tailwind 3 + TanStack Query + zustand** (Vite 5.4).
 - Deploy: el frontend buildeado se copia a `backend/src/rbom_api/static/` y uvicorn sirve SPA + API en un solo puerto (`:8000`). En producción Windows el wrapper es `nssm`.
 
+## Gobernanza de datos — este repo es un activo de `ezi-data-core`
+
+Todo lo que este proyecto sabe sobre EPS (qué tabla, qué filtro, qué trampa) es
+**doctrina compartida** con el repo de gobernanza de datos, no conocimiento
+privado de esta app:
+
+| | |
+| --- | --- |
+| Repo de gobernanza | `ezi-data-core` — clon local en `D:/Dev/Proyectos profesionales/Consultor EPS` ([github](https://github.com/AndresDRamos/ezi-data-core)) |
+| Contrato de este activo | `activos/RastreabilidadBOM/` — manifiesto `activo.yaml`, `_index.md` y `decisiones.md` (D-01…D-04) |
+| Slug | `rastreabilidad-wip` · estado **`certificado`** (6/6 checks verdes, 2026-08-03) |
+| Activo hermano | `plan-capacidad` — mismo dominio (requerimiento, cobertura, netteo), motor distinto. Traducción y divergencias: `activos/RastreabilidadBOM/decisiones.md` D-06 |
+| Checks de premisas | `validaciones/rastreabilidad-*.yaml` → `python validar.py --activo rastreabilidad-wip` |
+| Recetas de origen | `docs/reportes/Rastreabilidad-{arbol-bom,bloques-proceso,ubicacion}.md` |
+
+**Antes de escribir o modificar una query en `backend/src/rbom_api/sql/`, lee la
+fuente correspondiente en `Consultor EPS/docs/fuentes/`** — `demanda.md`,
+`produccion.md`, `embarques.md`, `materiales.md`, `rutas.md`,
+`clientes-grupos.md`. Ahí viven las trampas medidas contra la BD real: la clase
+NetSuit que cambia por cliente/ciudad, la demanda con `idMaterial` 0/NULL, los
+universos de cliente por lista de IDs (nunca `LIKE`), el anti-join de remisión.
+
+**La comunicación es en las dos direcciones.** Si descubres algo sobre EPS que
+no está en `docs/fuentes/`, o encuentras que la doctrina está equivocada,
+**corrige el data-core en el mismo cambio** — no lo dejes solo en un comentario
+de esta app. Precedente fundacional (2026-08-03): el patrón anti-join que
+publicaba `ezi-data-core` sobre-excluía el 21.6% del WIP y esta app tenía razón;
+la corrección viajó de aquí hacia allá. Una divergencia sin registrar vuelve
+invisible el próximo error de un quinto del inventario.
+
+Cuando un cambio toque una **premisa** (no un resultado: un supuesto que la UI da
+por cierto sin poder verlo), congélala como check en `validaciones/`. Los tests
+de `backend/tests/` fijan el **algoritmo**; los checks fijan los **datos**. No se
+sustituyen.
+
 ## Estructura del monorepo
 
 ```
@@ -67,7 +102,10 @@ Rastreabilidad-app/
 
 | Tarea | Archivos a leer (en orden) |
 | --- | --- |
-| Cambiar un query SQL | `backend/docs/data-flow.md` → `backend/src/rbom_api/sql/Q_*.sql` → `backend/src/rbom_api/domain/db.py` |
+| Cambiar un query SQL | **`Consultor EPS/docs/fuentes/<tema>.md` (la doctrina, primero)** → `backend/docs/data-flow.md` → `backend/src/rbom_api/sql/Q_*.sql` → `backend/src/rbom_api/domain/db.py` |
+| Descubrir/corregir algo sobre EPS (tabla, filtro, trampa) | `Consultor EPS/docs/fuentes/_index.md` → la fuente del tema → corregirla ahí **y** en el código → si es una premisa, check en `Consultor EPS/validaciones/` |
+| Entender por qué el WIP, la clase o el netteo son así | `Consultor EPS/activos/RastreabilidadBOM/decisiones.md` (D-01…D-04) |
+| Tocar el filtro de clase NetSuit | `Consultor EPS/docs/fuentes/demanda.md` (§ ClassID) → el CTE `cteClase` en las 6 SQL que lo llevan → `domain/db.py` (`_clase_predicate`) |
 | Agregar un placeholder de filtro a un query | `backend/docs/conventions.md` (sección placeholders) → `backend/src/rbom_api/domain/db.py` (`_*_predicate` + `_strip_param_declarations`) |
 | Modificar el algoritmo de netteo | `backend/docs/algoritmo-netteo.md` (obligatorio) → `backend/src/rbom_api/domain/netteo.py` → `backend/tests/unit/test_netteo.py` |
 | Tocar el requerimiento cross-PT (leyenda del nodo compartido) | `backend/docs/algoritmo-netteo.md` (§ CantidadEnsamble) → `backend/src/rbom_api/domain/universo_req.py` + `sql/Q_universo_req.sql` → `services/arbol_service.py` (`req_universo`, cache TTL) → `frontend/src/components/Canvas/nodes/ComponentNode.tsx` (`CompartidoLegend`) |
@@ -128,6 +166,12 @@ cd backend
   - **Universo "Caterpillar Priority"** (param `universo=caterpillar`): pestaña en el sidebar que acota listado + bloques + flujo a los `idMaterial` de `NumerosCriticos.csv` (raíz del repo). El backend lo lee con `domain/universos.py` (cache por mtime) e inyecta `/*PT_UNIVERSO_FILTER*/` en `cteDem` de cada query.
   - **Vista Calendario de requerimiento** (corte 1; panel expandible del sidebar, `frontend/src/components/Sidebar/CalendarioPanel.tsx`): matriz PT × tiempo con la demanda **BRUTA** (sin nettear WIP — el neteo sigue viviendo solo en el árbol) desagregada por día vía `GET /api/requerimiento/calendario` (`Q_requerimiento_calendario.sql`). Columna Past-due fija + buckets día/semana/mes (toggle) con heatmap cercano-cálido → lejano-frío, forecast hachurado, fila Total. Clic en celda abre un popover inferior con el detalle de línea de orden vía `GET /api/requerimiento/orden-detalle` (`Q_orden_detalle.sql`: OrdenVenta, POHeader/POLine, Fecha, PiezasPend, Precio_Unitario). Grano de fila = (PT × Cliente × Ciudad), igual que `Q_listado.sql` — un mismo PT puede repetirse. Toggle lista ⇄ calendario es un tercer estado de ancho del sidebar (`useUiStore.sidebarExpanded`).
   - **Historial de embarques en el Calendario** (fase 2, entregada): columnas azules a la IZQUIERDA del Past-due con lo embarcado por periodo (la actual pegada al Past-due, hacia atrás), vía `GET /api/requerimiento/embarques` (`Q_embarques_calendario.sql`, fuente `EPS.dbo.vwRemisiones`). Toggle `calModo` (`"requerimiento" | "embarques" | "ambos"`, default "ambos"). Eje unificado `[emb … | Esta semana | … req]`, navegable con ◀▶ (mismo offset). **El bucket actual se consolida en una sola columna `kind:"presente"`** (en vez de 3): franjas apiladas embarcado (↑) / past-due (!) / requerimiento (●), cada una con su heatmap y su propio detalle. `colsEmb` excluye el bucket actual cuando `incluyeReq`; `colsReq` siempre lo excluye; ambos van a `presenteCol`. Clic en celda de embarque → detalle de remisiones vía `GET /api/requerimiento/remision-detalle` (`Q_remision_detalle.sql`). Puentes NetSuite→EPS: `Item_Id→idMaterial` (vía `tblDemandaEPS` activa, acota al universo de la demanda), `Customer_Id→tblCliente.IdNetSuit`, `City→tblCiudad` (best-effort, sin match → "(sin ciudad)"). Filas ANCLA = requerimiento (los embarques solo enriquecen; en modo embarques-puro sí crean fila); tope `MAX_FILAS=250` con aviso. Los folios de `vwRemisiones` vienen numéricos → CAST a varchar en el SQL.
+  - **Conexión con `ezi-data-core`** (2026-08-03): el repo quedó registrado como activo
+    `rastreabilidad-wip` con manifiesto, decisiones y 4 checks de premisas (4/4 verdes). En la
+    auditoría se corrigieron tres cosas: la clase NetSuit pasa a `vwClassIDMaterial` (regla
+    14), la demanda sin material deja de esconderse (regla 15) y el patrón anti-join **del
+    data-core** se corrigió con lo que esta app ya hacía bien (regla 16). Ver la sección
+    "Gobernanza de datos" arriba.
 - Validado visualmente contra BD real con el **PT canónico 91711066-RA** (CNH Industrial, Hood W Rear Engine, 222 piezas pendientes):
   - `90358715-RA` muestra `Doblez (4 de 218)` en modo Requerimiento y `4 en piso` en modo Inventario.
   - `91711040-RA` muestra `Nivelado (0 de 213)` y `9 en piso`.
@@ -155,14 +199,73 @@ cd backend
    - `["remision-detalle", idMaterial, cliente, ciudad, desde, hasta]` — `staleTime: 2 min` (popover de detalle de una celda de EMBARQUE: líneas de remisión).
 7. **Si tocas `backend/src/rbom_api/domain/modelo.py`, replica en `frontend/src/api/types.ts`** — es el espejo TypeScript y no hay validación cruzada automática. Idea futura: generar con `openapi-typescript` desde `/openapi.json`.
 8. **Antes de borrar un PasoRuta virtual** lee `backend/docs/algoritmo-netteo.md` — el buffer virtual (`Almacen WIP`, idProceso=16) es parte del contrato del netteo: su `wip_en_paso` entra en `wip_total` y en el acumulado downstream de `req_paso`. Ya no alimenta la card directamente (desde 2026-07 muestra `wip_total` / `req_neto`), pero borrarlo **cambiaría los números**, no solo la UI.
-9. **Solo el bucket "Por procesar" alimenta el netteo**. `liberadas` y `en_inspeccion` son display puro. Si introduces una nueva métrica desde el WIP, decide explícitamente si descuenta demanda y refleja la decisión en `domain/netteo.py` + un test que la fije.
+9. **Alimentan el netteo `Disponibles + Recibidas + EnInspeccionSig`** (todo lo que aún debe *entrar* al proceso). `liberadas`, `en_inspeccion` (la de **salida**, keyed por `idProcesoUlt`) y `retrabajo` son display puro. **[2026-08-03]** `en_inspeccion_sig` —estatus POR INSPECCION keyed por `idProcesoSiguiente`— se sumó al netteo: la huella FIFO del CLR muestra que ese estatus aporta el 4% de las asignaciones con 99.5% de acierto, y con él el pool coincide con el del activo `plan-capacidad` (497,574 pzs). Si introduces una métrica nueva desde el WIP, decide explícitamente si descuenta demanda y refleja la decisión en `domain/netteo.py` + un test que la fije.
 9-bis. **`tblBomExplosionado.CantidadEnsamble` viene ACUMULADA desde el PT raíz**, no es local padre→hijo. El netteo la convierte con `_cantidad_local` (divisor = fila con `IdBom == IdBomParent`, **nunca** `cantidad_ensamble_total[padre]`). Tratarla como local re-aplica el factor del padre en cada nivel — bug real que reportaba 918 piezas donde correspondían 0. Ver `backend/docs/algoritmo-netteo.md` § "Semántica de CantidadEnsamble".
-9-ter. **No sumes el `req_neto` de netteos por PT** para obtener un requerimiento cross-PT: descuenta el mismo WIP una vez por cada PT que lo reclama (576 de 6,113 componentes son compartidos). El netteo global multi-raíz vive en `domain/universo_req.py`. El requerimiento del árbol abierto y el del universo **no cuadran a propósito** — el árbol se atribuye el 100% del WIP; el universo lo reparte. La UI lo advierte en la leyenda del nodo compartido.
+9-ter. **El WIP compartido se reparte FIFO entre los PT que lo reclaman.** *[2026-08-04]*
+    `universo_req.repartir_wip_fifo` asigna a cada PT su cuota —el más vencido primero, sin
+    prorratear, misma regla que el CLR y que `plan-capacidad`— y `arbol_service` recorta el
+    WIP del árbol a esa cuota antes de netear. **Consecuencia: la suma de los árboles ya
+    CUADRA con el netteo del universo**; hasta 2026-08-03 no cuadraban a propósito porque
+    cada árbol se atribuía el 100% del WIP, y 9 de cada 10 PT de un componente compartido
+    mostraban "0 por fabricar" siendo falso (medido: 689 pares PT×componente afectados,
+    82,986 pzs de requerimiento invisible).
+    - `NodoComponente.wip_total` = la **cuota** de este PT (la que descuenta `req_neto`).
+    - `NodoComponente.wip_fisico` = las piezas **en piso**, sin repartir. La card muestra
+      "0 de 15,172 en piso" y el badge dice "Asignado a otros" en vez de "Sin WIP".
+    - El reparto es por **PT**, no por línea de demanda (el CLR va línea a línea); dentro de
+      un PT sus líneas comparten el lote asignado.
+    - El reparto por proceso es **proporcional** al WIP de cada paso: conserva el total sin
+      alterar la forma de la cadena. Igualar al CLR (que consume por planta×proceso) exige
+      traer el WIP del universo desagregado por proceso.
+    - Si el reparto falla, `armar_arbol` cae al comportamiento anterior (100% del WIP) y lo
+      registra: un árbol optimista es más útil que un error.
+    Fijado por `test_fifo_*` en `tests/unit/test_universo_req.py`.
 10. **Si agregas un parámetro `DECLARE` nuevo a una `.sql`**, agrégalo al stripping de `_strip_param_declarations` en `backend/src/rbom_api/domain/db.py`, o SQL Server fallará con `variable already declared`.
 11. **Los placeholders `/*FILTRO*/` en las SQL del Resumen se reemplazan por string-substitution**: los `_*_predicate` de `db.py` validan cada id como `int(...)` antes de armar el `IN (...)`. Si agregas un placeholder nuevo, sigue ese patrón y NO concatenes strings del usuario directamente.
 12. **Los feedback de carga**: no dejar como primer estado un "0", ni un estado en blanco como inicial, sobretodo si es un número que aún está esperando los cálculos, utilizar un componente de carga.
 13. **Las columnas consolidadas del Excel son definiciones de negocio, no cálculos libres.** Viven en `services/export_service.py` y las fija `tests/unit/test_export.py`: *Total WIP* = `wip_total` (para un kit, unidades ya ensambladas = kits completos en piso); *Total completos* = `wip_en_paso` del **último paso de la ruta** del componente (donde esperan las piezas que ya recorrieron todo lo anterior); *Requerimiento neto* = `req_neto`. Si cambias una definición, cambia su test — el planner toma decisiones de producción con esas columnas.
 13-bis. **"Total completos" se deriva de la ESTRUCTURA de la ruta, sin idProceso hardcodeados.** Dos trampas que por eso evita: (a) NO es el WIP del último proceso de *fabricación* — por la trampa #10, `wip_en_paso[X]` son piezas esperando **entrar** a X, así que las del último proceso son justo las que aún NO terminaron (en el canónico esa lectura daría 4 para `90358715-RA` y 0 para `91711040-RA`, invertido). (b) NO se suma por lista `{13,16}`: `idProceso=16` es el **primer** paso real en los PT que arrancan con ARMADO DE KITS, no el buffer final. El último paso de la ruta resuelve ambos casos: para intermedios es el buffer virtual `Almacen WIP`, para el PT su último proceso catalogado. Fijado por `test_total_completos_*`.
+
+14. **La clase NetSuit sale de `EPS.dbo.vwClassIDMaterial`, nunca de `NETSUITE.dbo.ITEMS`.**
+    La clase NO es global del item: vive al grano **(idMaterial, idCliente, idCiudad)** — el
+    mismo material se clasifica distinto según a quién y a dónde se vende. Las 6 SQL que la
+    tocan llevan un CTE `cteClase` idéntico con `ROW_NUMBER ... rn = 1`: **el dedup no es
+    defensivo**, la vista admite >1 fila por las tres llaves y sin él el `SUM` de piezas se
+    infla por fan-out. Fijado por el check `rastreabilidad-clase-sin-fanout`.
+15. **`tblDemandaEPS.idMaterial` admite `0` y `NULL`** — son líneas de demanda **reales** sin
+    material catalogado. En el **listado** y el **calendario** (demanda bruta) se etiquetan
+    con `bSinMaterial = 1` y siguen contando; un `INNER JOIN` a `tblMaterial` las escondía en
+    silencio. En el **árbol** y el **flujo** el `INNER JOIN` sí es correcto: parten del BOM,
+    que exige material. Fijado por el check `rastreabilidad-demanda-sin-material`.
+16. **El anti-join de remisión va contra `EPS.dbo.vwEtiquetasEnRemision`** (≡ remisión a
+    cliente, `idTipoDestino = 1`), **no** contra toda `tblRemisionEtiquetaDetalle`. Una
+    etiqueta remisionada a otra planta o a maquila **no salió del sistema: se movió**, y sigue
+    siendo WIP. El patrón sin ese filtro borra 108,272 pzs (21.6% del WIP activo). Fijado por
+    el check `rastreabilidad-antijoin-tipodestino`.
+
+17. **`faltante` es la carga del proceso; `req_paso` NO.** El `PasoRuta` publica los dos, y
+    el `ProcessNode` muestra **`faltante`** (etiqueta "a procesar") desde 2026-08-03:
+    - `faltante[i]` = `req_bruto − Σ wip[k]` para `k = i+1…último` (**exclusivo**) — lo que
+      ese proceso tiene que procesar, **incluidas las piezas que ya esperan en él**. Es la
+      columna `Piezas` del CapacidadDetalle y del activo `plan-capacidad`.
+    - `req_paso[i]` = lo mismo pero **inclusivo** — lo que aún *no ha llegado*. Alimenta el
+      netteo aguas arriba y sigue decidiendo el color "cubierto".
+
+    La diferencia es exactamente `wip_en_paso[i]`, así que `faltante = req_paso + wip_en_paso`
+    (capado a `req_bruto`). Fijado por `test_equivalencia_faltante_plan_capacidad`.
+
+18. **La demanda de esta app y la del `CapacidadDetalle` CUADRAN (ratio 1.000).** No hay
+    sobreestimación: `tblDemandaEPS` da 3,661,142 pzs y `fnDemandaEPS` da 3,661,059 sumando
+    sus **dos** lados. En `fnDemandaEPS` el signo de `IdDemandaEps` **no separa demanda real
+    de inventada: separa "aún sin programar" (`>0`) de "ya programada por el planeador"
+    (`<0`, la demanda interna)**. Filtrar por el signo para "comparar solo cliente" descarta
+    una mitad y fabrica una diferencia del 33% que no existe — pasó el 2026-08-03 y está
+    documentado como D-07 en `activos/RastreabilidadBOM/decisiones.md`.
+    **Para comparar contra el CapacidadDetalle hacen falta tres cosas**: incluir la demanda
+    interna, **deduplicar por recurso** (el CSV repite las piezas idénticas en cada recurso
+    del mismo proceso y solo reparte las horas → tomar el máximo, no la suma) y alinear el
+    techo de fecha. Con eso y la traducción de la regla 17, coinciden en el **94.3%** de los
+    pasos (ratio agregado 0.993).
 
 ## Convenciones de los documentos
 

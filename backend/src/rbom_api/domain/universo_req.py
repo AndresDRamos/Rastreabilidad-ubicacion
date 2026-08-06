@@ -28,25 +28,131 @@ sola vez** por componente. Es la misma regla del componente compartido que
 `netteo.py` ya aplica dentro de un arbol (trampa #7 del contrato), elevada al
 bosque.
 
-Relacion con el arbol de un PT
-------------------------------
-Los dos numeros conviven y **no cuadran entre si**, a proposito:
+Relacion con el arbol de un PT — [2026-08-03] YA CUADRAN
+--------------------------------------------------------
+Hasta 2026-08-03 el arbol de un PT se atribuia el 100% del WIP fisico y este
+modulo repartia; los dos numeros convivian sin cuadrar y la UI lo advertia en la
+leyenda. **Eso cambio**: `repartir_wip_fifo` asigna a cada PT la porcion de WIP
+que le toca, y el arbol nettea contra esa porcion. La suma de los arboles
+coincide ahora con el netteo agregado del universo (verificado: el componente
+compartido por 10 PT da 33,244 por ambas vias).
 
-- El arbol de un PT muestra el requerimiento *de ese PT*, atribuyendose el 100%
-  del WIP fisico del componente (comportamiento historico, no se toca).
-- Este modulo muestra el requerimiento *del universo*, repartiendo ese WIP entre
-  todos los que lo reclaman.
+El reparto es **FIFO por urgencia**, la misma regla del CLR de cobertura y del
+activo `plan-capacidad` de ezi-data-core: los PT se sirven del inventario
+compartido en orden de promesa mas antigua primero, sin prorratear. En el ejemplo
+de arriba, si PT-A es el mas urgente se lleva las 50 piezas y PT-B se queda con
+su requerimiento intacto — no se parten 25 y 25.
 
-En el ejemplo de arriba el nodo diria 10 en grande (arbol abierto) y 50 en la
-leyenda (universo). Por eso la UI debe advertir que el WIP mostrado tambien lo
-reclaman otros PTs.
+Granularidad: el FIFO se resuelve por **PT**, no por linea de demanda (el CLR va
+linea a linea). Es la traduccion natural aqui, porque la unidad que el usuario
+abre es el arbol de un PT; dentro de un PT sus lineas comparten el mismo lote
+asignado.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date
 
 from .modelo import FilaAristaUniverso, FilaDemandaUniverso, FilaWipUniverso, ReqUniverso
+
+# Un PT sin fecha de promesa va al final de la cola FIFO: si no sabemos que tan
+# urgente es, no puede quitarle inventario a uno que si tiene fecha vencida.
+_SIN_FECHA = date(2099, 12, 31)
+
+
+def repartir_wip_fifo(
+    demanda_filas: list[FilaDemandaUniverso],
+    arista_filas: list[FilaAristaUniverso],
+    wip_filas: list[FilaWipUniverso],
+) -> dict[tuple[int, int], float]:
+    """Reparte el WIP fisico entre los PT que lo reclaman, FIFO por urgencia.
+
+    Replica la regla del CLR de cobertura (y del activo `plan-capacidad`): el
+    inventario es un recurso COMPARTIDO y se sirve a la demanda mas vencida
+    primero, sin prorratear. Lo que un PT toma deja de estar disponible para los
+    siguientes.
+
+    Returns:
+        (idPT, idComp) -> piezas de WIP asignadas a ese PT. Las combinaciones sin
+        entrada tienen 0: ese PT no alcanzo inventario de ese componente.
+    """
+    demanda: dict[int, float] = {}
+    urgencia: dict[int, date] = {}
+    for fd in demanda_filas:
+        demanda[fd.idMaterial] = demanda.get(fd.idMaterial, 0.0) + fd.PiezasPend
+        f = fd.FechaPromMin or _SIN_FECHA
+        # Si el PT llega en varias filas, manda la promesa mas antigua.
+        if fd.idMaterial not in urgencia or f < urgencia[fd.idMaterial]:
+            urgencia[fd.idMaterial] = f
+
+    pool: dict[int, float] = {}
+    for fw in wip_filas:
+        pool[fw.idComp] = pool.get(fw.idComp, 0.0) + fw.Piezas
+
+    hijos_de: dict[int, list[tuple[int, float]]] = defaultdict(list)
+    padres_de: dict[int, set[int]] = defaultdict(set)
+    nodos: set[int] = set(demanda)
+    for fa in arista_filas:
+        hijos_de[fa.idPadre].append((fa.idComp, fa.CantidadEnsamble))
+        padres_de[fa.idComp].add(fa.idPadre)
+        nodos.add(fa.idComp)
+        nodos.add(fa.idPadre)
+
+    # Orden topologico GLOBAL, calculado una sola vez. Se reusa para todos los PT:
+    # dentro del sub-arbol de cualquier PT sigue garantizando padres antes que
+    # hijos, que es lo que necesita la propagacion.
+    in_degree = {n: len(padres_de.get(n, set())) for n in nodos}
+    listos = [n for n in nodos if in_degree[n] == 0]
+    pos: dict[int, int] = {}
+    orden: list[int] = []
+    while listos:
+        nodo = listos.pop()
+        pos[nodo] = len(orden)
+        orden.append(nodo)
+        for hijo, _ in hijos_de.get(nodo, []):
+            in_degree[hijo] -= 1
+            if in_degree[hijo] == 0:
+                listos.append(hijo)
+    # Los nodos en ciclo (dato sucio) van al final; no deben tumbar el reparto.
+    for n in nodos:
+        pos.setdefault(n, len(orden) + 1)
+
+    asignado: dict[tuple[int, int], float] = {}
+
+    for pt in sorted(demanda, key=lambda p: (urgencia.get(p, _SIN_FECHA), p)):
+        # Requerimiento propagado dentro del sub-arbol de ESTE PT. Se recorre en
+        # orden topologico para que un componente compartido acumule TODAS las
+        # contribuciones de sus padres antes de consumir inventario (misma regla
+        # del componente compartido de netteo.py, trampa #7).
+        req: dict[int, float] = {pt: demanda[pt]}
+        pendientes: list[int] = [pt]
+        vistos: set[int] = {pt}
+        # Descubrir el sub-arbol alcanzable desde el PT.
+        i = 0
+        while i < len(pendientes):
+            actual = pendientes[i]
+            i += 1
+            for hijo, _cant in hijos_de.get(actual, []):
+                if hijo not in vistos:
+                    vistos.add(hijo)
+                    pendientes.append(hijo)
+
+        for comp in sorted(vistos, key=lambda c: pos.get(c, 0)):
+            bruto = req.get(comp, 0.0)
+            if bruto <= 0:
+                continue
+            disponible = pool.get(comp, 0.0)
+            toma = min(disponible, bruto)
+            if toma > 0:
+                pool[comp] = disponible - toma
+                asignado[(pt, comp)] = asignado.get((pt, comp), 0.0) + toma
+            neto = bruto - toma
+            if neto > 0:
+                for hijo, cant in hijos_de.get(comp, []):
+                    req[hijo] = req.get(hijo, 0.0) + neto * cant
+
+    return asignado
 
 
 def construir_universo(

@@ -38,7 +38,11 @@ export interface ComponentNodeData extends Record<string, unknown> {
   descripcion: string;
   nivel: number;
   reqBruto: number;
+  /** Cuota de WIP de ESTE PT (reparto FIFO). Es la que descuenta reqNeto. */
   wipTotal: number;
+  /** Piezas fisicas en piso sin repartir. Difiere de wipTotal solo cuando el
+   *  componente lo reclaman varios PT. */
+  wipFisico: number;
   reqNeto: number;
   // La card usa `wipTotal` (inventario) y `reqNeto` (requerimiento): dos vistas
   // complementarias del mismo universo de piezas. El PasoRuta virtual
@@ -63,11 +67,16 @@ export interface ProcessNodeData extends Record<string, unknown> {
   idPlanta: number | null;
   ordenEnRuta: number;
   totalPasos: number;
+  /** Carga del proceso (incluye lo que ya espera en el). Es el numero grande. */
+  faltante: number;
+  /** Lo que aun no ha llegado al paso. Se conserva para el tooltip. */
   reqPaso: number;
-  // wipEnPaso = disponibles + recibidas (alimenta netteo)
+  // wipEnPaso = disponibles + recibidas + enInspeccionSig (alimenta netteo)
   wipEnPaso: number;
   etiquetasEnPaso: number;
-  // Desglose display del WIP que aun debe pasar por X
+  // Desglose del WIP que aun debe pasar por X (los tres SI netean)
+  enInspeccionSig: number;       // en QC, va camino a este proceso
+  etiquetasInspeccionSig: number;
   disponibles: number;
   etiquetasDisponibles: number;
   recibidas: number;
@@ -196,6 +205,7 @@ export function buildGraph(
         nivel: c.nivel,
         reqBruto: c.req_bruto,
         wipTotal: c.wip_total,
+        wipFisico: c.wip_fisico,
         reqNeto: c.req_neto,
         cadenaRuta: c.cadena_ruta,
         ultimoPaso: ultimoPasoReal,
@@ -237,9 +247,12 @@ export function buildGraph(
           idPlanta: paso.idPlanta,
           ordenEnRuta: idx + 1,
           totalPasos: pasosReales.length,
+          faltante: paso.faltante,
           reqPaso: paso.req_paso,
           wipEnPaso: paso.wip_en_paso,
           etiquetasEnPaso: paso.etiquetas_en_paso,
+          enInspeccionSig: paso.en_inspeccion_sig,
+          etiquetasInspeccionSig: paso.etiquetas_inspeccion_sig,
           disponibles: paso.disponibles,
           etiquetasDisponibles: paso.etiquetas_disponibles,
           recibidas: paso.recibidas,

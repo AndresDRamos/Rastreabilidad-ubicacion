@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import defaultdict
 from typing import Iterable
 
 import pyodbc
@@ -24,7 +25,7 @@ from ..domain.modelo import (
     ReqUniverso,
 )
 from ..domain.netteo import construir_arbol
-from ..domain.universo_req import construir_universo
+from ..domain.universo_req import construir_universo, repartir_wip_fifo
 
 
 log = structlog.get_logger("rbom_api.services.arbol")
@@ -41,6 +42,90 @@ _universo_cache: TTLCache[tuple[int, str | None], dict[int, ReqUniverso]] = TTLC
     maxsize=8, ttl=300
 )
 _universo_lock = threading.Lock()
+
+# Cuota de WIP por (idPT, idComp) del reparto FIFO. Misma key y mismo TTL que el
+# universo: sale de los mismos insumos y caduca con ellos. Se cachea aparte
+# porque el arbol la necesita en cada request y recalcularla cuesta ~30 ms.
+_fifo_cache: TTLCache[tuple[int, str | None], dict[tuple[int, int], float]] = TTLCache(
+    maxsize=8, ttl=300
+)
+_fifo_lock = threading.Lock()
+
+
+def cuota_wip_fifo(
+    conn: pyodbc.Connection,
+    ventana_meses: int,
+    fecha_max: str | None = None,
+) -> dict[tuple[int, int], float]:
+    """Reparto FIFO del WIP entre los PT que lo reclaman, cacheado 5 min.
+
+    Ver domain/universo_req.repartir_wip_fifo: el inventario compartido se sirve
+    a la demanda mas vencida primero, sin prorratear.
+    """
+    key = (ventana_meses, fecha_max)
+    with _fifo_lock:
+        cached = _fifo_cache.get(key)
+    if cached is not None:
+        return cached
+
+    t0 = time.perf_counter()
+    demanda_raw, aristas_raw, wip_raw, _ = db.fetch_universo_req(
+        conn, ventana_meses=ventana_meses, fecha_max=fecha_max
+    )
+    asignado = repartir_wip_fifo(
+        demanda_filas=[FilaDemandaUniverso(**f) for f in demanda_raw],
+        arista_filas=[FilaAristaUniverso(**f) for f in aristas_raw],
+        wip_filas=[FilaWipUniverso(**f) for f in wip_raw],
+    )
+    log.info(
+        "wip_fifo_done",
+        ventana_meses=ventana_meses,
+        fecha_max=fecha_max,
+        n_pares=len(asignado),
+        piezas_repartidas=round(sum(asignado.values()), 2),
+        duration_ms=round((time.perf_counter() - t0) * 1000, 2),
+    )
+    with _fifo_lock:
+        _fifo_cache[key] = asignado
+    return asignado
+
+
+def _recortar_wip_a_cuota(
+    wip: list[FilaWip], cuota: dict[int, float]
+) -> tuple[list[FilaWip], dict[int, float]]:
+    """Recorta el WIP del arbol a la cuota FIFO de este PT.
+
+    El reparto asigna un total por componente; el arbol lo necesita por
+    (componente, proceso). Se reparte **proporcionalmente al WIP de cada
+    proceso**: conserva el total y no altera la forma de la cadena. (El CLR
+    consume por (componente, planta, proceso); igualarlo exige traer el WIP del
+    universo desagregado por proceso y se puede hacer despues sin rehacer esto.)
+
+    Los conteos de ETIQUETAS y los buckets de display (liberadas, inspeccion de
+    salida, retrabajo) NO se escalan: son hechos del piso, no cuotas.
+
+    Returns:
+        (wip recortado, wip fisico por componente antes del recorte)
+    """
+    fisico: dict[int, float] = defaultdict(float)
+    for f in wip:
+        fisico[f.idComp] += f.Piezas
+
+    recortado: list[FilaWip] = []
+    for f in wip:
+        total = fisico[f.idComp]
+        mia = cuota.get(f.idComp, 0.0)
+        if total <= 0 or mia >= total:
+            recortado.append(f)          # nadie mas lo reclama: se queda con todo
+            continue
+        k = mia / total
+        recortado.append(f.model_copy(update={
+            "Piezas": f.Piezas * k,
+            "PiezasDisponibles": f.PiezasDisponibles * k,
+            "PiezasRecibidas": f.PiezasRecibidas * k,
+            "PiezasInspeccionSig": f.PiezasInspeccionSig * k,
+        }))
+    return recortado, dict(fisico)
 
 
 def listar_pts(
@@ -157,6 +242,21 @@ def armar_arbol(
     ruta = [FilaRuta(**f) for f in ruta_raw]
     wip = [FilaWip(**f) for f in wip_raw]
 
+    # Reparto FIFO: este PT solo nettea contra la cuota de WIP que le toca. Un
+    # fallo aqui NO tumba el arbol — se cae al comportamiento anterior (100% del
+    # WIP) y se registra, porque un arbol con un reparto optimista sigue siendo
+    # mas util que un error.
+    wip_fisico: dict[int, float] | None = None
+    if con_universo:
+        try:
+            cuota_global = cuota_wip_fifo(conn, ventana_meses, fecha_max)
+            mia = {
+                comp: pzs for (pt, comp), pzs in cuota_global.items() if pt == idPt
+            }
+            wip, wip_fisico = _recortar_wip_a_cuota(wip, mia)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("wip_fifo_failed", idPt=idPt, error=str(exc))
+
     t0 = time.perf_counter()
     arbol = construir_arbol(
         demanda_filas=demanda,
@@ -165,6 +265,7 @@ def armar_arbol(
         wip_filas=wip,
         almacen_wip_id=settings.almacen_wip_proceso_id,
         almacen_wip_nombre=settings.almacen_wip_proceso_nombre,
+        wip_fisico_por_comp=wip_fisico,
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(

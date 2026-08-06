@@ -424,6 +424,100 @@ def test_req_paso_caso_diagrama_usuario():
     assert pasos_c2[3].es_virtual               and pasos_c2[3].req_paso == 213
 
 
+def test_equivalencia_faltante_plan_capacidad():
+    """Contrato de traduccion con el activo `plan-capacidad` de ezi-data-core.
+
+    Los dos motores netean demanda contra WIP recorriendo la ruta hacia atras,
+    pero publican columnas DISTINTAS sobre el mismo paso:
+
+        plan-capacidad  Faltante[i] = req_bruto - SUM(wip[k])  k = i+1 .. ultimo
+        rastreabilidad  req_paso[i] = req_bruto - SUM(wip[k])  k = i   .. ultimo
+
+    La diferencia es exactamente el WIP parado EN ese paso, asi que la traduccion
+    es exacta y sin perdida:
+
+        Faltante[i] == req_paso[i] + wip_en_paso[i]      (capado a req_bruto)
+
+    Ninguna de las dos esta mal: "cuantas piezas tiene que procesar Doblez" son
+    222 (las 4 que ya esperan mas las 218 que vienen de Corte), y "cuantas aun no
+    han llegado a Doblez" son 218. Este test fija que la app siga pudiendo
+    responder AMBAS sin cambiar el netteo. Ver, en ezi-data-core,
+    activos/RastreabilidadBOM/decisiones.md (D-06).
+
+    Reusa el escenario del diagrama canonico (222 pzs, 4 en Doblez, 9 en buffer).
+    """
+    PT_ID, C1_ID, C2_ID = 911, 901, 902
+    DOBLEZ_P, CORTE_P, NIVELADO_P, SOLD_P, PINT_P, EMB_P = 4, 3, 18, 6, 7, 13
+
+    demanda = [{
+        "idMaterial": PT_ID, "PT": "91711066-RA", "Descripcion": "PT",
+        "idCliente": 1, "Cliente": "Test", "idCiudad": 1, "Ciudad": "Test City",
+        "PiezasPend": 222, "FechaPromMin": date(2026, 5, 25),
+        "FechaPromMax": date(2026, 5, 25), "PiezasPastDue": 0,
+    }]
+    bom = [
+        FilaBom(IdBom=1, IdBomParent=None, BomLevel=1, idComp=PT_ID,
+                Componente="91711066-RA", IdPadre=None, idTipoMat=1,
+                CantidadEnsamble=1, HijosTotales=2, bLastLevel=False),
+        FilaBom(IdBom=2, IdBomParent=1, BomLevel=2, idComp=C1_ID,
+                Componente="90358715-RA", IdPadre=PT_ID, idTipoMat=3,
+                CantidadEnsamble=1, HijosTotales=0, bLastLevel=True),
+        FilaBom(IdBom=3, IdBomParent=1, BomLevel=2, idComp=C2_ID,
+                Componente="91711040-RA", IdPadre=PT_ID, idTipoMat=3,
+                CantidadEnsamble=1, HijosTotales=0, bLastLevel=True),
+    ]
+    rutas = [
+        FilaRuta(idComp=PT_ID, OrdenRuta=10, idRuta=1, Ruta="Sold", idProceso=SOLD_P,
+                 Proceso="Soldadura", idProcesoSiguiente=PINT_P, ProcesoSiguiente="Pintura"),
+        FilaRuta(idComp=PT_ID, OrdenRuta=20, idRuta=2, Ruta="Pint", idProceso=PINT_P,
+                 Proceso="Pintura", idProcesoSiguiente=EMB_P, ProcesoSiguiente="Embarques"),
+        FilaRuta(idComp=PT_ID, OrdenRuta=30, idRuta=3, Ruta="Emb", idProceso=EMB_P,
+                 Proceso="Embarques"),
+        FilaRuta(idComp=C1_ID, OrdenRuta=10, idRuta=4, Ruta="Laser", idProceso=CORTE_P,
+                 Proceso="Corte laser", idProcesoSiguiente=DOBLEZ_P, ProcesoSiguiente="Doblez"),
+        FilaRuta(idComp=C1_ID, OrdenRuta=20, idRuta=5, Ruta="Doblez", idProceso=DOBLEZ_P,
+                 Proceso="Doblez"),
+        FilaRuta(idComp=C2_ID, OrdenRuta=10, idRuta=4, Ruta="Laser", idProceso=CORTE_P,
+                 Proceso="Corte laser", idProcesoSiguiente=NIVELADO_P, ProcesoSiguiente="Nivelado"),
+        FilaRuta(idComp=C2_ID, OrdenRuta=20, idRuta=6, Ruta="Niv", idProceso=NIVELADO_P,
+                 Proceso="Nivelado", idProcesoSiguiente=DOBLEZ_P, ProcesoSiguiente="Doblez"),
+        FilaRuta(idComp=C2_ID, OrdenRuta=30, idRuta=5, Ruta="Doblez", idProceso=DOBLEZ_P,
+                 Proceso="Doblez"),
+    ]
+    wip = [
+        FilaWip(idComp=C1_ID, idProceso=DOBLEZ_P, Proceso="Doblez", Etiquetas=1, Piezas=4),
+        FilaWip(idComp=C2_ID, idProceso=ALM_WIP_ID, Proceso="Almacen WIP", Etiquetas=1, Piezas=9),
+    ]
+
+    arbol = construir_arbol(
+        demanda_filas=demanda, bom_filas=bom, ruta_filas=rutas, wip_filas=wip,
+        almacen_wip_id=ALM_WIP_ID, almacen_wip_nombre=ALM_WIP_NOMBRE,
+    )
+
+    for comp in arbol.componentes:
+        # `faltante` reconstruido de forma independiente: acumulado downstream
+        # EXCLUSIVO del paso actual. Debe coincidir con el que publica el netteo.
+        acum_excl = 0.0
+        for k in range(len(comp.ruta) - 1, -1, -1):
+            paso = comp.ruta[k]
+            esperado = max(0.0, comp.req_bruto - acum_excl)
+            acum_excl += paso.wip_en_paso
+            assert paso.faltante == esperado, (
+                f"{comp.clave} paso {paso.proceso}: faltante={paso.faltante} "
+                f"!= {esperado}"
+            )
+            # La identidad que hace la traduccion exacta y sin perdida.
+            assert paso.faltante == min(paso.req_paso + paso.wip_en_paso,
+                                        comp.req_bruto)
+
+    nodos = {n.idComp: n for n in arbol.componentes}
+    # Testigo explicito del diagrama: Doblez de 90358715-RA.
+    doblez = next(p for p in nodos[C1_ID].ruta if p.proceso == "Doblez")
+    assert doblez.req_paso == 218 and doblez.wip_en_paso == 4
+    assert doblez.faltante == 222        # lo que Doblez tiene que procesar
+    assert doblez.label == "Doblez (4 de 222)"
+
+
 def test_cantidad_ensamble_acumulada_se_convierte_a_local():
     """Regresion: CantidadEnsamble viene ACUMULADA desde el PT raiz.
 
@@ -686,3 +780,68 @@ def test_liberadas_e_inspeccion_no_afectan_req_paso():
     assert paso_sold.etiquetas_liberadas == 9
     assert paso_sold.en_inspeccion == 999
     assert paso_sold.etiquetas_inspeccion == 9
+
+
+def test_inspeccion_hacia_el_siguiente_paso_si_netea():
+    """[2026-08-03] El estatus POR INSPECCION SI descuenta demanda cuando va
+    camino al paso — es el contrapunto del test de arriba.
+
+    Hay que distinguir dos cosas que antes se llamaban igual:
+
+      · `en_inspeccion`     — la etiqueta SALIO de X y esta en QC (keyed por
+                              idProcesoUlt). Display: no descuenta nada.
+      · `en_inspeccion_sig` — la etiqueta va HACIA X y esta en QC (keyed por
+                              idProcesoSiguiente). **Netea**, igual que las
+                              Disponibles y las Recibidas.
+
+    Motivo: la huella FIFO real del CLR de cobertura muestra que el estatus 1
+    aporta el 4% de las asignaciones con 99.5% de acierto, y el activo
+    `plan-capacidad` ya lo contaba (su wip.sql filtra idEstatusEtiqueta IN (1,2)).
+    Con este cambio los dos motores netean contra el mismo pool. Ver, en
+    ezi-data-core, activos/RastreabilidadBOM/decisiones.md (D-06).
+
+    El SQL entrega `Piezas` ya sumado (Disponibles + Recibidas + EnInspeccionSig),
+    asi que el test alimenta las dos columnas de forma consistente.
+    """
+    # Baseline: 1 pza disponible esperando Soldadura para CB.
+    wip_sin_qc = [
+        FilaWip(idComp=CB, idProceso=SOLDADURA, Proceso="Soldadura",
+                Etiquetas=1, Piezas=1,
+                EtiquetasDisponibles=1, PiezasDisponibles=1),
+    ]
+    # Mismo escenario + 5 pzas en QC camino a Soldadura.
+    wip_con_qc = [
+        FilaWip(idComp=CB, idProceso=SOLDADURA, Proceso="Soldadura",
+                Etiquetas=2, Piezas=6,                      # 1 disponible + 5 en QC
+                EtiquetasDisponibles=1, PiezasDisponibles=1,
+                EtiquetasInspeccionSig=1, PiezasInspeccionSig=5),
+    ]
+
+    def _construir(wip):
+        return construir_arbol(
+            demanda_filas=_demanda(req_pt=10),
+            bom_filas=_bom(),
+            ruta_filas=_rutas(),
+            wip_filas=wip,
+            almacen_wip_id=ALM_WIP_ID,
+            almacen_wip_nombre=ALM_WIP_NOMBRE,
+        )
+
+    sin_qc = {n.idComp: n for n in _construir(wip_sin_qc).componentes}[CB]
+    con_qc = {n.idComp: n for n in _construir(wip_con_qc).componentes}[CB]
+
+    # Las 5 pzas en QC descuentan demanda: el requerimiento neto baja.
+    assert sin_qc.wip_total == 1
+    assert con_qc.wip_total == 6
+    assert con_qc.req_neto == sin_qc.req_neto - 5
+
+    paso_sin = next(p for p in sin_qc.ruta if p.idProceso == SOLDADURA)
+    paso_con = next(p for p in con_qc.ruta if p.idProceso == SOLDADURA)
+    assert paso_sin.wip_en_paso == 1
+    assert paso_con.wip_en_paso == 6
+    # y el desglose viaja al frontend para que el numero sea explicable
+    assert paso_con.en_inspeccion_sig == 5
+    assert paso_con.etiquetas_inspeccion_sig == 1
+    assert paso_con.disponibles == 1
+    # req_paso de un paso aguas arriba refleja el descuento
+    assert paso_con.req_paso == paso_sin.req_paso - 5

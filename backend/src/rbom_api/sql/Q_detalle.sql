@@ -192,7 +192,8 @@ WITH
   (
     -- Disponibles: estatus=2, sig=X, ubic <> X
     SELECT idComp, idProcesoSiguiente AS idProceso, cantidad,
-           1 AS bDisp, 0 AS bRecib, 0 AS bTrans, 0 AS bInsp, 0 AS bRetrab
+           1 AS bDisp, 0 AS bRecib, 0 AS bTrans, 0 AS bInsp, 0 AS bRetrab,
+           0 AS bInspSig
     FROM cteEtq
     WHERE idEstatusEtiqueta = 2 AND idProcesoSiguiente IS NOT NULL
       AND (procesoUbicacion IS NULL OR procesoUbicacion <> idProcesoSiguiente)
@@ -201,10 +202,30 @@ WITH
 
     -- Recibidas: estatus=2, sig=X, ubic = X
     SELECT idComp, idProcesoSiguiente, cantidad,
-           0, 1, 0, 0, 0
+           0, 1, 0, 0, 0, 0
     FROM cteEtq
     WHERE idEstatusEtiqueta = 2 AND idProcesoSiguiente IS NOT NULL
       AND procesoUbicacion = idProcesoSiguiente
+
+    UNION ALL
+
+    -- EnInspeccionSig: estatus=1 (POR INSPECCION) keyed por el proceso al que la
+    -- pieza ENTRA, no por el que la libero. ALIMENTA EL NETTEO.
+    --
+    -- Es la misma etiqueta que la rama "Inspeccion" de mas abajo, contada bajo
+    -- otra llave: alli cuelga de idProcesoUlt (salio de X y esta en QC) y es
+    -- display; aqui cuelga de idProcesoSiguiente (va camino a Y) y descuenta
+    -- demanda. No hay doble conteo dentro de una misma columna.
+    --
+    -- Por que cuenta: la huella FIFO real del CLR de cobertura muestra que el
+    -- estatus 1 aporta el 4% de las asignaciones con 99.5% de acierto — omitirlo
+    -- pierde WIP. Es la evidencia que trae el activo `plan-capacidad`, cuyo
+    -- wip.sql filtra idEstatusEtiqueta IN (1,2); con este cambio los dos motores
+    -- netean contra el MISMO pool. Ver decisiones.md D-06 de ezi-data-core.
+    SELECT idComp, idProcesoSiguiente, cantidad,
+           0, 0, 0, 0, 0, 1
+    FROM cteEtq
+    WHERE idEstatusEtiqueta = 1 AND idProcesoSiguiente IS NOT NULL
 
     UNION ALL
 
@@ -213,7 +234,7 @@ WITH
     --  cuando ubic=sig deja de ser "Por transferir" en X y cuenta como
     --  "Recibidas" del siguiente.)
     SELECT idComp, idProcesoUlt, cantidad,
-           0, 0, 1, 0, 0
+           0, 0, 1, 0, 0, 0
     FROM cteEtq
     WHERE idEstatusEtiqueta = 2
       AND idProcesoUlt IS NOT NULL
@@ -223,9 +244,9 @@ WITH
 
     UNION ALL
 
-    -- Inspeccion: estatus=1, procActual=X
+    -- Inspeccion: estatus=1, procActual=X  (display: salio de X y esta en QC)
     SELECT idComp, idProcesoUlt, cantidad,
-           0, 0, 0, 1, 0
+           0, 0, 0, 1, 0, 0
     FROM cteEtq
     WHERE idEstatusEtiqueta = 1 AND idProcesoUlt IS NOT NULL
 
@@ -233,7 +254,7 @@ WITH
 
     -- Retrabajo: estatus=5, procActual=X
     SELECT idComp, idProcesoUlt, cantidad,
-           0, 0, 0, 0, 1
+           0, 0, 0, 0, 1, 0
     FROM cteEtq
     WHERE idEstatusEtiqueta = 5 AND idProcesoUlt IS NOT NULL
   )
@@ -241,14 +262,19 @@ SELECT
    b.idComp
   ,b.idProceso
   ,ISNULL(p.Nombre, '(sin proceso)')                                           AS Proceso
-  -- Compat con netteo: Piezas/Etiquetas = Disponibles + Recibidas
-  ,SUM(CASE WHEN b.bDisp = 1 OR b.bRecib = 1 THEN 1 ELSE 0 END)                AS Etiquetas
-  ,SUM(CASE WHEN b.bDisp = 1 OR b.bRecib = 1 THEN b.cantidad ELSE 0 END)       AS Piezas
+  -- El bucket que ALIMENTA EL NETTEO: Disponibles + Recibidas + EnInspeccionSig.
+  -- [2026-08-03] Se sumo EnInspeccionSig (estatus 1 keyed por proceso siguiente)
+  -- para netear contra el mismo pool que el activo `plan-capacidad`.
+  ,SUM(CASE WHEN b.bDisp = 1 OR b.bRecib = 1 OR b.bInspSig = 1 THEN 1 ELSE 0 END)          AS Etiquetas
+  ,SUM(CASE WHEN b.bDisp = 1 OR b.bRecib = 1 OR b.bInspSig = 1 THEN b.cantidad ELSE 0 END) AS Piezas
   -- Desglose individual
   ,SUM(CASE WHEN b.bDisp   = 1 THEN 1 ELSE 0 END)                              AS EtiquetasDisponibles
   ,SUM(CASE WHEN b.bDisp   = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasDisponibles
   ,SUM(CASE WHEN b.bRecib  = 1 THEN 1 ELSE 0 END)                              AS EtiquetasRecibidas
   ,SUM(CASE WHEN b.bRecib  = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasRecibidas
+  -- Parte del netteo que viene de QC (estatus 1, camino a este proceso)
+  ,SUM(CASE WHEN b.bInspSig = 1 THEN 1 ELSE 0 END)                             AS EtiquetasInspeccionSig
+  ,SUM(CASE WHEN b.bInspSig = 1 THEN b.cantidad ELSE 0 END)                    AS PiezasInspeccionSig
   ,SUM(CASE WHEN b.bTrans  = 1 THEN 1 ELSE 0 END)                              AS EtiquetasLiberadas
   ,SUM(CASE WHEN b.bTrans  = 1 THEN b.cantidad ELSE 0 END)                     AS PiezasLiberadas
   ,SUM(CASE WHEN b.bInsp   = 1 THEN 1 ELSE 0 END)                              AS EtiquetasInspeccion

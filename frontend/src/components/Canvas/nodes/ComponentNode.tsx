@@ -58,11 +58,26 @@ export function ComponentNode({ data }: Props) {
   //     cualquier proceso de su ruta (incluido el buffer Almacen WIP).
   //   requerimiento -> reqNeto: lo que falta fabricar, = max(0, reqBruto - wipTotal).
   const valor = mode === "inventario" ? data.wipTotal : data.reqNeto;
-  const subLabel = mode === "inventario" ? "en piso" : "por fabricar";
+  // Cuando el componente lo reclaman varios PT, `wipTotal` es la CUOTA que el
+  // reparto FIFO asigno a este arbol y `wipFisico` lo que hay en el piso. Se
+  // muestran los dos ("13,900 de 15,430 en piso") para que el reparto sea
+  // visible en vez de parecer que faltan piezas.
+  const repartido = data.wipFisico > data.wipTotal + 0.5;
+  const subLabel =
+    mode === "inventario"
+      ? repartido
+        ? `de ${fmtInt(data.wipFisico)} en piso`
+        : "en piso"
+      : "por fabricar";
 
   const ring = STATUS_RING[data.status];
   const badgeCls = STATUS_BADGE_BG[data.status];
-  const badgeText = STATUS_LABEL[data.status];
+  // "Sin WIP" mentiria cuando SI hay piezas en piso pero se las llevaron PT mas
+  // urgentes: el componente no esta desabastecido, esta comprometido.
+  const badgeText =
+    data.status === "empty" && repartido
+      ? "Asignado a otros"
+      : STATUS_LABEL[data.status];
   const btnCls = data.expanded
     ? STATUS_BTN_FILLED[data.status]
     : STATUS_BTN_OUTLINED[data.status];
@@ -107,7 +122,14 @@ export function ComponentNode({ data }: Props) {
               procesos
             </span>
           ) : null}
-          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${badgeCls}`}>
+          <span
+            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${badgeCls}`}
+            title={
+              data.status === "empty" && repartido
+                ? `Hay ${fmtInt(data.wipFisico)} pzs en piso, pero las reclaman PT con promesa mas vencida. A este arbol no le toca ninguna.`
+                : undefined
+            }
+          >
             {badgeText}
           </span>
         </div>

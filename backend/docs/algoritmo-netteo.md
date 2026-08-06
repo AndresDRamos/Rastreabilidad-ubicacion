@@ -13,7 +13,7 @@ Un PT (producto terminado) con demanda activa requiere fabricar componentes inte
 | DEMANDA | `EPS.dbo.tblDemandaEPS` | Piezas pendientes por (PT × Cliente × Ciudad). Past-due incluido sin piso de fecha. |
 | BOM | `EPS.AppProc.tblBomExplosionado` | Árbol multinivel (`IdBomParent`, `IdPadre`, `BomLevel`, `CantidadEnsamble`). Filtro `IdTipoMaterial IN (1,3)` excluye MP/Dibujos/Indirectos/Herramental. Trae también `PrimerIdProceso` y `UltimoIdProceso` por componente para ayudar a la cadena de ruta. |
 | RUTA | `tblMaterialRutaTiempo JOIN tblRuta JOIN tblProceso` | Secuencia de procesos por componente. `LEAD(idProceso) OVER (ORDER BY OrdenFabricacion)` infiere el siguiente paso. |
-| WIP | `EPS.Produccion.tblEtiqueta` (`bActiva=1, idTipoEtiqueta=3`, `idEstatusEtiqueta IN (1,2)`) + `tblEtiquetaProceso` con `bUltimoProceso=1`, excluyendo etiquetas presentes en `vwEtiquetasEnRemision`. | **3 buckets** por `(idComp, idProceso)`: `Piezas/Etiquetas` (Por procesar, alimenta netteo), `PiezasLiberadas/EtiquetasLiberadas` (display), `PiezasInspeccion/EtiquetasInspeccion` (display). |
+| WIP | `EPS.Produccion.tblEtiqueta` (`bActiva=1, idTipoEtiqueta=3`, `idEstatusEtiqueta IN (1,2,5)`) + `tblEtiquetaProceso` con `bUltimoProceso=1`, excluyendo etiquetas presentes en `vwEtiquetasEnRemision`. | Buckets por `(idComp, idProceso)`: `Piezas/Etiquetas` = Disponibles + Recibidas + **EnInspeccionSig** (alimenta netteo); `PiezasLiberadas`, `PiezasInspeccion`, `PiezasRetrabajo` (display). |
 
 Las queries que producen estos result-sets son `backend/src/rbom_api/sql/Q_listado.sql` (un PT × Cliente × Ciudad por fila) y `backend/src/rbom_api/sql/Q_detalle.sql` (4 result-sets por PT).
 
@@ -21,9 +21,19 @@ Las queries que producen estos result-sets son `backend/src/rbom_api/sql/Q_lista
 
 | Bucket | Significado | ¿Alimenta netteo? |
 | --- | --- | --- |
-| **Por procesar** | `idProcesoSiguiente = idProceso ∧ estatus LIBERADO`. Piezas que terminaron el paso anterior y esperan entrar al proceso `idProceso`. | **Sí** — único bucket que descuenta demanda. |
+| **Por procesar** | `idProcesoSiguiente = idProceso ∧ estatus LIBERADO`. Piezas que terminaron el paso anterior y esperan entrar al proceso `idProceso`. | **Sí** |
+| **En QC hacia X** (`en_inspeccion_sig`) | `idProcesoSiguiente = idProceso ∧ estatus POR INSPECCION`. Piezas que van **hacia** `idProceso` y siguen en QC. | **Sí** — desde 2026-08-03 |
 | **Liberadas** | `bUltimoProceso=1 ∧ estatus LIBERADO`. Piezas que YA salieron del proceso `idProceso` y esperan al siguiente. | No (display). |
-| **En Inspección** | `bUltimoProceso=1 ∧ estatus POR INSPECCION`. Piezas que pasaron por el proceso y siguen en QC. | No (display). |
+| **En Inspección** (`en_inspeccion`) | `bUltimoProceso=1 ∧ estatus POR INSPECCION`. Piezas que **salieron** del proceso y siguen en QC. | No (display). |
+
+> **Las dos filas de inspección son la misma etiqueta bajo llaves distintas.** Una cuelga del
+> proceso que la liberó (`idProcesoUlt`) y es display; la otra del proceso al que va
+> (`idProcesoSiguiente`) y netea. No hay doble conteo dentro de una columna — es el mismo
+> patrón que ya usaba "PorTransferir". **Por qué netea**: la huella FIFO real del CLR de
+> cobertura muestra que el estatus 1 aporta el 4% de las asignaciones con 99.5% de acierto;
+> omitirlo pierde 27,842 pzs de WIP. Con el cambio, el pool del netteo de esta app y el del
+> activo `plan-capacidad` de ezi-data-core son **el mismo** (497,574 pzs). Fijado por
+> `test_inspeccion_hacia_el_siguiente_paso_si_netea`.
 
 **Regla dura**: si introduces una nueva métrica derivada del WIP, decide explícitamente si descuenta demanda y refleja la decisión en un test. La separación entre "alimenta netteo" y "display" está cubierta por `test_liberadas_e_inspeccion_no_afectan_req_paso`.
 
@@ -150,6 +160,20 @@ Un mismo `idComp` puede aparecer bajo varios padres en `tblBomExplosionado`. Por
 - `req_bruto[16821455]` **SUMA** todas las contribuciones de sus padres.
 - `wip_total[16821455]` se descuenta **UNA SOLA VEZ** (el WIP físico no se duplica).
 - El nodo aparece **una sola vez** en el árbol, pero con varias aristas hijo → padre (una por aparición).
+
+### Componentes compartidos entre PT distintos — reparto FIFO *(2026-08-04)*
+
+Lo de arriba resuelve el componente compartido **dentro** de un árbol. Entre árboles
+distintos hace falta más: si 10 PT reclaman el mismo componente, cada `construir_arbol`
+descontaría las mismas piezas y nueve dirían "0 por fabricar" siendo falso.
+
+`universo_req.repartir_wip_fifo` asigna a cada PT su **cuota** —el más vencido primero, sin
+prorratear— y `arbol_service` recorta `wip_filas` a esa cuota antes de llamar aquí. Por eso
+`construir_arbol` recibe hoy **el WIP que este PT puede consumir**, no el físico del piso; el
+físico llega aparte en `wip_fisico_por_comp` y solo viaja a la card (`NodoComponente.wip_fisico`)
+para poder mostrar "0 de 15,172 en piso".
+
+Consecuencia sobre el contrato: **la suma de los árboles ya cuadra con el netteo del universo**.
 
 Este caso está cubierto explícitamente por el test `test_componente_compartido_suma_req_bruto`.
 

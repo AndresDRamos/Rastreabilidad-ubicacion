@@ -54,11 +54,27 @@ SET NOCOUNT ON;
 DECLARE @idPlantaFiltro int = @idPlantaFiltro;
 
 -- (0) Universo de componentes (PTs con demanda activa -> sus PT/Intermedios) ---
-;WITH cteDem AS
+;WITH cteClase AS
+(
+    -- Clase NetSuit vigente al grano (material x cliente x ciudad), dedupeada.
+    -- Doctrina ezi-data-core (docs/fuentes/demanda.md): la clase NO es global del
+    -- item — el mismo material tiene clase distinta por cliente/ciudad.
+    SELECT idMaterial, idCliente, idCiudad, CLASS_ID_ARTCULO_ID
+    FROM (
+        SELECT idMaterial, idCliente, idCiudad, CLASS_ID_ARTCULO_ID,
+               ROW_NUMBER() OVER (PARTITION BY idMaterial, idCliente, idCiudad
+                                  ORDER BY CLASS_ID_ARTCULO_ID DESC, ITEM_ID DESC) AS rn
+        FROM EPS.dbo.vwClassIDMaterial
+    ) x
+    WHERE rn = 1
+)
+,cteDem AS
 (
     SELECT DISTINCT d.idMaterial AS idPT
     FROM EPS.dbo.tblDemandaEPS d
-    LEFT JOIN NETSUITE.dbo.ITEMS I ON I.ITEM_ID = d.ItemID
+    LEFT JOIN cteClase I ON I.idMaterial = d.idMaterial
+                        AND I.idCliente  = d.idCliente
+                        AND I.idCiudad   = d.idCiudad
     WHERE d.bActivo = 1
         AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
     /*CLIENTES_FILTER*/

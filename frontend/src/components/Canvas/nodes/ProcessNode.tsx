@@ -30,6 +30,9 @@ export function ProcessNode({ data }: Props) {
   const mode = useUiStore((s) => s.mode);
   const esRequerimiento = mode === "requerimiento";
 
+  // `cubierto` = ya no falta que llegue nada de aguas arriba. OJO: el numero
+  // grande es `faltante` (la carga del proceso), que puede ser > 0 aunque este
+  // cubierto — significa "hay que procesar N y las N ya estan aqui".
   const cubierto = data.reqPaso <= 0;
   const hasFooter = data.enInspeccion > 0 || data.retrabajo > 0;
 
@@ -100,6 +103,7 @@ export function ProcessNode({ data }: Props) {
       {/* Pipeline compacto + requerimiento (solo en modo Requerimiento) */}
       <div className="px-2 py-1 flex items-center gap-2">
         <MiniPipeline
+          enInspeccionSig={data.enInspeccionSig}
           disponibles={data.disponibles}
           recibidas={data.recibidas}
           liberadas={data.liberadas}
@@ -107,16 +111,23 @@ export function ProcessNode({ data }: Props) {
         />
 
         {esRequerimiento ? (
-          <div className="shrink-0 text-right leading-none">
+          <div
+            className="shrink-0 text-right leading-none"
+            title={
+              `${fmtInt(data.faltante)} piezas tiene que procesar ${data.proceso}: ` +
+              `${fmtInt(data.wipEnPaso)} ya esperan aqui y ` +
+              `${fmtInt(data.reqPaso)} aun deben llegar de los pasos anteriores.`
+            }
+          >
             <div
               className={`text-lg font-bold tabular-nums tracking-tight ${
                 cubierto ? "text-status-covered" : "text-ink"
               }`}
             >
-              {fmtInt(data.reqPaso)}
+              {fmtInt(data.faltante)}
             </div>
             <div className="text-[8px] uppercase tracking-wide text-ink-subtle mt-0.5">
-              {cubierto ? "cubierto" : "requerido"}
+              {cubierto ? "a procesar · completo" : "a procesar"}
             </div>
           </div>
         ) : null}
@@ -144,6 +155,9 @@ interface Stage {
 }
 
 interface MiniPipelineProps {
+  /** En QC camino a este proceso. Desde 2026-08-03 SI descuenta demanda, asi que
+   *  se muestra: sin el, wipEnPaso seria un numero que no cuadra con la suma. */
+  enInspeccionSig: number;
   disponibles: number;
   recibidas: number;
   liberadas: number;
@@ -151,11 +165,18 @@ interface MiniPipelineProps {
   muted?: boolean;
 }
 
-/** Pipeline Disponibles -> Recibidas -> Por transferir: 3 puntos conectados
- *  por una linea. El punto se enciende (color del bucket) si su valor es > 0;
- *  "Recibidas" es el paso central y se muestra con enfasis (numero mas grande). */
-function MiniPipeline({ disponibles, recibidas, liberadas, muted = false }: MiniPipelineProps) {
+/** Pipeline [En QC ->] Disponibles -> Recibidas -> Por transferir: puntos
+ *  conectados por una linea. El punto se enciende (color del bucket) si su valor
+ *  es > 0; "Recibidas" es el paso central y se muestra con enfasis. La etapa
+ *  "En QC" solo aparece cuando hay algo en ella — es poco frecuente y no vale
+ *  gastarle ancho al nodo cuando esta en cero. */
+function MiniPipeline({
+  enInspeccionSig, disponibles, recibidas, liberadas, muted = false,
+}: MiniPipelineProps) {
   const stages: Stage[] = [
+    ...(enInspeccionSig > 0
+      ? [{ value: enInspeccionSig, label: "En QC", dotCls: "bg-status-partial", main: false }]
+      : []),
     { value: disponibles, label: "Disponibles", dotCls: "bg-status-covered", main: false },
     { value: recibidas, label: "Recibidas", dotCls: "bg-ink", main: true },
     { value: liberadas, label: "Por transferir", dotCls: "bg-status-pt", main: false },

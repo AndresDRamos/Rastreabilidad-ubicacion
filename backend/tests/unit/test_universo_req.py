@@ -8,12 +8,14 @@ para evitar.
 
 from __future__ import annotations
 
+from datetime import date
+
 from rbom_api.domain.modelo import (
     FilaAristaUniverso,
     FilaDemandaUniverso,
     FilaWipUniverso,
 )
-from rbom_api.domain.universo_req import construir_universo
+from rbom_api.domain.universo_req import construir_universo, repartir_wip_fifo
 
 
 # ids sinteticos
@@ -25,6 +27,104 @@ def _dem(pares: list[tuple[int, str, float]]) -> list[FilaDemandaUniverso]:
         FilaDemandaUniverso(idMaterial=i, PT=clave, PiezasPend=pzs)
         for i, clave, pzs in pares
     ]
+
+
+def _dem_f(pares: list[tuple[int, str, float, date | None]]) -> list[FilaDemandaUniverso]:
+    """Demanda CON fecha de promesa — la llave del reparto FIFO."""
+    return [
+        FilaDemandaUniverso(idMaterial=i, PT=clave, PiezasPend=pzs, FechaPromMin=f)
+        for i, clave, pzs, f in pares
+    ]
+
+
+def test_fifo_sirve_al_mas_urgente_primero():
+    """El inventario compartido NO se prorratea: se sirve por urgencia.
+
+    X lo demandan PT-A (60, promete el 10-ene) y PT-B (40, promete el 5-ene).
+    Hay 50 piezas. PT-B es mas urgente, asi que se lleva sus 40 completas y a
+    PT-A le quedan 10 — no 25 y 25.
+    """
+    asignado = repartir_wip_fifo(
+        demanda_filas=_dem_f([
+            (PT_A, "PT-A", 60, date(2026, 1, 10)),
+            (PT_B, "PT-B", 40, date(2026, 1, 5)),
+        ]),
+        arista_filas=[
+            FilaAristaUniverso(idPadre=PT_A, idComp=COMP_X, CantidadEnsamble=1),
+            FilaAristaUniverso(idPadre=PT_B, idComp=COMP_X, CantidadEnsamble=1),
+        ],
+        wip_filas=[FilaWipUniverso(idComp=COMP_X, Piezas=50)],
+    )
+
+    assert asignado[(PT_B, COMP_X)] == 40, "el mas urgente se sirve completo"
+    assert asignado[(PT_A, COMP_X)] == 10, "al segundo le queda el remanente"
+    # Y lo esencial: el WIP fisico no se reparte dos veces.
+    assert asignado[(PT_A, COMP_X)] + asignado[(PT_B, COMP_X)] == 50
+
+
+def test_fifo_conserva_el_total_del_universo():
+    """La suma de los netteos por PT con el WIP repartido == netteo agregado.
+
+    Es la propiedad que hace que el arbol y la leyenda del universo dejen de
+    contradecirse: 100 de demanda, 50 de WIP -> 50 por fabricar por ambas vias.
+    """
+    dem = _dem_f([
+        (PT_A, "PT-A", 60, date(2026, 1, 10)),
+        (PT_B, "PT-B", 40, date(2026, 1, 5)),
+    ])
+    aristas = [
+        FilaAristaUniverso(idPadre=PT_A, idComp=COMP_X, CantidadEnsamble=1),
+        FilaAristaUniverso(idPadre=PT_B, idComp=COMP_X, CantidadEnsamble=1),
+    ]
+    wip = [FilaWipUniverso(idComp=COMP_X, Piezas=50)]
+
+    asignado = repartir_wip_fifo(dem, aristas, wip)
+    # Cada PT nettea contra SU porcion, como hara construir_arbol.
+    neto_a = max(0.0, 60 - asignado.get((PT_A, COMP_X), 0.0))
+    neto_b = max(0.0, 40 - asignado.get((PT_B, COMP_X), 0.0))
+
+    universo = construir_universo(
+        demanda_filas=dem, arista_filas=aristas, wip_filas=wip,
+        pts_por_comp={COMP_X: [PT_A, PT_B]},
+    )
+    assert neto_a + neto_b == universo[COMP_X].req_neto_total == 50
+
+
+def test_fifo_no_reparte_mas_wip_del_que_existe():
+    """Invariante dura: la suma de lo asignado nunca excede el WIP fisico."""
+    asignado = repartir_wip_fifo(
+        demanda_filas=_dem_f([
+            (PT_A, "PT-A", 1000, date(2026, 1, 1)),
+            (PT_B, "PT-B", 1000, date(2026, 1, 2)),
+        ]),
+        arista_filas=[
+            FilaAristaUniverso(idPadre=PT_A, idComp=COMP_X, CantidadEnsamble=1),
+            FilaAristaUniverso(idPadre=PT_B, idComp=COMP_X, CantidadEnsamble=1),
+        ],
+        wip_filas=[FilaWipUniverso(idComp=COMP_X, Piezas=30)],
+    )
+    assert sum(asignado.values()) == 30
+    assert asignado[(PT_A, COMP_X)] == 30, "el primero agota el pool"
+    assert (PT_B, COMP_X) not in asignado, "al segundo no le queda nada"
+
+
+def test_fifo_propaga_a_los_hijos_lo_que_el_padre_no_cubrio():
+    """El reparto baja por el BOM: lo que el padre no encontro hecho es lo que
+    sus hijos tienen que surtir, y ahi tambien compite por inventario."""
+    asignado = repartir_wip_fifo(
+        demanda_filas=_dem_f([(PT_A, "PT-A", 100, date(2026, 1, 1))]),
+        arista_filas=[
+            FilaAristaUniverso(idPadre=PT_A, idComp=COMP_X, CantidadEnsamble=1),
+            FilaAristaUniverso(idPadre=COMP_X, idComp=COMP_Y, CantidadEnsamble=2),
+        ],
+        wip_filas=[
+            FilaWipUniverso(idComp=COMP_X, Piezas=40),
+            FilaWipUniverso(idComp=COMP_Y, Piezas=500),
+        ],
+    )
+    assert asignado[(PT_A, COMP_X)] == 40
+    # X queda con 60 por fabricar -> Y necesita 60*2 = 120, y hay 500.
+    assert asignado[(PT_A, COMP_Y)] == 120
 
 
 def test_wip_compartido_se_descuenta_una_sola_vez():

@@ -14,6 +14,11 @@
 --   @ventana_meses  int    Default 3
 --   @fecha_max      date   Default NULL. Recorta el techo a esa fecha (past-due
 --                          sigue incluido). Cutoff efectivo = ISNULL(@fecha_max, @techo).
+--
+-- Doctrina ezi-data-core (docs/fuentes/demanda.md): tblDemandaEPS.idMaterial
+-- admite 0 y NULL — son lineas de demanda REALES sin material catalogado. Un
+-- INNER JOIN a tblMaterial las escondia en silencio; aqui se etiquetan con
+-- bSinMaterial = 1 y siguen contando, porque esta vista es demanda BRUTA.
 -- =============================================================================
 
 DECLARE @ventana_meses int = ISNULL(@ventana_meses, 3);
@@ -24,7 +29,7 @@ DECLARE @cutoff        date = ISNULL(@fecha_max, @techo);
 
 WITH cteDem AS (
     SELECT
-        d.idMaterial,
+        ISNULL(d.idMaterial, 0)                          AS idMaterial,
         d.idCliente,
         d.idCiudad,
         CAST(d.Fecha AS date)                            AS Fecha,
@@ -35,12 +40,15 @@ WITH cteDem AS (
       AND d.Fecha   <= @cutoff                           -- past-due incluido (sin piso)
       AND (d.Cantidad - ISNULL(d.Embarcado, 0)) > 0
       /*PT_UNIVERSO_FILTER*/
-    GROUP BY d.idMaterial, d.idCliente, d.idCiudad, CAST(d.Fecha AS date), d.bForecast
+    GROUP BY ISNULL(d.idMaterial, 0), d.idCliente, d.idCiudad,
+             CAST(d.Fecha AS date), d.bForecast
 )
 SELECT
     d.idMaterial,
-    m.ClaveMaterial                                AS PT,
-    m.Descripcion,
+    ISNULL(m.ClaveMaterial, '(sin material en EPS)')  AS PT,
+    ISNULL(m.Descripcion, 'Linea de demanda sin material catalogado en EPS')
+                                                      AS Descripcion,
+    CAST(CASE WHEN m.idMaterial IS NULL THEN 1 ELSE 0 END AS bit) AS bSinMaterial,
     d.idCliente,
     ISNULL(c.NombreCliente, '(sin cliente)')       AS Cliente,
     d.idCiudad,
@@ -49,7 +57,7 @@ SELECT
     d.bForecast,
     d.PiezasPend
 FROM cteDem d
-JOIN EPS.dbo.tblMaterial m  ON d.idMaterial = m.idMaterial
+LEFT JOIN EPS.dbo.tblMaterial m ON d.idMaterial = m.idMaterial
 LEFT JOIN EPS.dbo.tblCliente c  ON d.idCliente = c.idCliente
 LEFT JOIN EPS.dbo.tblCiudad  ci ON d.idCiudad  = ci.idCiudad
 ORDER BY d.idMaterial, d.Fecha;

@@ -5,12 +5,15 @@ export interface FilaListado {
   idMaterial: number;
   PT: string;
   Descripcion: string;
+  // true = la demanda existe pero su idMaterial (0 o NULL) no esta en tblMaterial.
+  // Es demanda REAL: cuenta piezas, pero no tiene BOM ni ruta -> no se abre arbol.
+  bSinMaterial: boolean;
   idCliente: number | null;
   Cliente: string;
   idCiudad: number | null;
   Ciudad: string;
-  idClase: number | null; // NETSUITE.dbo.ITEMS.CLASS_ID_ARTCULO_ID
-  Clase: string | null;   // NETSUITE.dbo.CLASS_ID.LIST_ITEM_NAME
+  idClase: number | null; // vwClassIDMaterial.CLASS_ID_ARTCULO_ID (material x cliente x ciudad)
+  Clase: string | null;   // vwClassIDMaterial.LIST_ITEM_NAME
   PiezasPend: number;
   PiezasPastDue: number;
   FechaPromMin: string; // ISO date
@@ -31,6 +34,9 @@ export interface CeldaCalendario {
   idMaterial: number;
   PT: string;
   Descripcion: string;
+  // Ver FilaListado.bSinMaterial — el calendario es demanda BRUTA, la linea sin
+  // material catalogado sigue contando piezas.
+  bSinMaterial: boolean;
   idCliente: number | null;
   Cliente: string;
   idCiudad: number | null;
@@ -105,16 +111,22 @@ export interface PasoRuta {
   ruta: string | null;
   idPlanta: number | null;
   es_virtual: boolean;
+  /** LA CARGA del proceso: piezas que este paso tiene que procesar, incluidas las
+   *  que ya esperan en el. Es la columna `Piezas` del CapacidadDetalle. */
+  faltante: number;
+  /** Lo que AUN NO HA LLEGADO al paso: faltante - wip_en_paso. */
   req_paso: number;
-  // wip_en_paso = disponibles + recibidas (lo que aun debe pasar por X);
-  // unico que alimenta el netteo.
+  // wip_en_paso = disponibles + recibidas + en_inspeccion_sig (lo que aun debe
+  // pasar por X); unico que alimenta el netteo.
   wip_en_paso: number;
   etiquetas_en_paso: number;
-  // Desglose display del WIP que aun debe pasar por X
+  // Desglose del WIP que aun debe pasar por X (los tres SI netean)
   disponibles: number;         // estatus=LIBERADO, sig=X, ubic <> X
   etiquetas_disponibles: number;
   recibidas: number;           // estatus=LIBERADO, sig=X, ubic = X
   etiquetas_recibidas: number;
+  en_inspeccion_sig: number;   // estatus=POR INSPECCION, sig=X (en QC, va hacia X)
+  etiquetas_inspeccion_sig: number;
   // Salidas de X (solo display)
   liberadas: number;           // estatus=LIBERADO, procActual=X, sig <> X
   etiquetas_liberadas: number;
@@ -156,7 +168,12 @@ export interface NodoComponente {
   tipo_material: number; // 1 = PT, 3 = Intermedio
   cantidad_ensamble_total: number;
   req_bruto: number;
+  /** WIP que ESTE PT puede consumir: su cuota del reparto FIFO cuando el
+   *  componente es compartido. Es el que descuenta `req_neto`. */
   wip_total: number;
+  /** Piezas fisicas en piso, SIN repartir. Igual a `wip_total` cuando nadie mas
+   *  reclama el componente. */
+  wip_fisico: number;
   req_neto: number;
   ruta: PasoRuta[];
   cadena_ruta: string;

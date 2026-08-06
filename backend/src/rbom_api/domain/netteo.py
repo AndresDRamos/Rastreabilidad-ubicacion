@@ -47,8 +47,20 @@ def construir_arbol(
     wip_filas: list[FilaWip],
     almacen_wip_id: int,
     almacen_wip_nombre: str,
+    wip_fisico_por_comp: dict[int, float] | None = None,
 ) -> ArbolPT:
-    """Arma el arbol netteado de un PT a partir de los 4 result-sets crudos."""
+    """Arma el arbol netteado de un PT a partir de los 4 result-sets crudos.
+
+    Args:
+        wip_filas: WIP que este PT puede consumir. Desde 2026-08-03 el servicio
+            lo recorta a la CUOTA que el reparto FIFO le asigno (ver
+            `universo_req.repartir_wip_fifo`), asi que ya no es el WIP fisico del
+            piso sino la porcion de este PT.
+        wip_fisico_por_comp: idComp -> piezas fisicas totales en piso, SIN
+            repartir. Solo informativo: viaja a `NodoComponente.wip_fisico` para
+            que la card pueda decir "13,900 de 15,430 en piso". None = no hubo
+            reparto y el fisico coincide con lo consumible.
+    """
 
     if not demanda_filas:
         raise ValueError("Sin filas de demanda — el PT no tiene demanda activa en la ventana.")
@@ -114,8 +126,10 @@ def construir_arbol(
         raise ValueError("No se encontro el PT raiz en tblBomExplosionado (IdPadre=NULL).")
 
     # ---- WIP por componente y por (componente, proceso) ---------------------
-    # Solo el bucket Piezas (Disponibles + Recibidas) alimenta el netteo.
-    # Liberadas / Inspección / Retrabajo son solo display y no descuentan demanda.
+    # Solo el bucket Piezas alimenta el netteo. Desde 2026-08-03 son TRES sumandos:
+    # Disponibles + Recibidas + EnInspeccionSig (estatus POR INSPECCION cuyo proceso
+    # SIGUIENTE es este paso). Liberadas / Inspeccion-de-salida / Retrabajo siguen
+    # siendo solo display y no descuentan demanda.
     wip_total: dict[int, float] = defaultdict(float)
     wip_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
@@ -123,6 +137,8 @@ def construir_arbol(
     etiquetas_disponibles_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     recibidas_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_recibidas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
+    insp_sig_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
+    etiquetas_insp_sig_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     liberadas_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
     etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int] = defaultdict(int)
     inspeccion_por_paso: dict[tuple[int, int | None], float] = defaultdict(float)
@@ -137,6 +153,8 @@ def construir_arbol(
         etiquetas_disponibles_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasDisponibles
         recibidas_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasRecibidas
         etiquetas_recibidas_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasRecibidas
+        insp_sig_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasInspeccionSig
+        etiquetas_insp_sig_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasInspeccionSig
         liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasLiberadas
         etiquetas_liberadas_por_paso[(fw.idComp, fw.idProceso)] += fw.EtiquetasLiberadas
         inspeccion_por_paso[(fw.idComp, fw.idProceso)] += fw.PiezasInspeccion
@@ -186,6 +204,8 @@ def construir_arbol(
             etiquetas_disponibles_por_paso=etiquetas_disponibles_por_paso,
             recibidas_por_paso=recibidas_por_paso,
             etiquetas_recibidas_por_paso=etiquetas_recibidas_por_paso,
+            insp_sig_por_paso=insp_sig_por_paso,
+            etiquetas_insp_sig_por_paso=etiquetas_insp_sig_por_paso,
             liberadas_por_paso=liberadas_por_paso,
             etiquetas_liberadas_por_paso=etiquetas_liberadas_por_paso,
             inspeccion_por_paso=inspeccion_por_paso,
@@ -222,6 +242,10 @@ def construir_arbol(
             cantidad_ensamble_total=cantidad_ensamble_total[idComp],
             req_bruto=req_bruto[idComp],
             wip_total=wip_total.get(idComp, 0.0),
+            # Sin reparto, el fisico ES lo consumible.
+            wip_fisico=(wip_fisico_por_comp or {}).get(
+                idComp, wip_total.get(idComp, 0.0)
+            ),
             req_neto=req_neto[idComp],
             ruta=pasos,
             cadena_ruta=cadena_ruta,
@@ -331,6 +355,8 @@ def _construir_pasos(
     etiquetas_disponibles_por_paso: dict[tuple[int, int | None], int],
     recibidas_por_paso: dict[tuple[int, int | None], float],
     etiquetas_recibidas_por_paso: dict[tuple[int, int | None], int],
+    insp_sig_por_paso: dict[tuple[int, int | None], float],
+    etiquetas_insp_sig_por_paso: dict[tuple[int, int | None], int],
     liberadas_por_paso: dict[tuple[int, int | None], float],
     etiquetas_liberadas_por_paso: dict[tuple[int, int | None], int],
     inspeccion_por_paso: dict[tuple[int, int | None], float],
@@ -359,7 +385,9 @@ def _construir_pasos(
        ``req_paso[i] = req_bruto - sum(WIP en pasos i, i+1, ..., final)``
        Las piezas en este paso ya completaron los previos -> no se cuentan en el
        requerimiento upstream. Solo el bucket "Por procesar" (wip_en_paso) entra
-       a esta formula — Liberadas / Inspección son solo display.
+       a esta formula. Desde 2026-08-03 ese bucket incluye las piezas en QC cuyo
+       proceso SIGUIENTE es este paso (`en_inspeccion_sig`); las Liberadas y la
+       inspeccion DE SALIDA de X siguen siendo solo display.
     """
     # Agrupar por idProceso preservando el orden de primera aparicion
     grupos: list[tuple[int, FilaRuta, list[str]]] = []
@@ -388,6 +416,8 @@ def _construir_pasos(
             etiquetas_disponibles=etiquetas_disponibles_por_paso.get(key, 0),
             recibidas=recibidas_por_paso.get(key, 0.0),
             etiquetas_recibidas=etiquetas_recibidas_por_paso.get(key, 0),
+            en_inspeccion_sig=insp_sig_por_paso.get(key, 0.0),
+            etiquetas_inspeccion_sig=etiquetas_insp_sig_por_paso.get(key, 0),
             liberadas=liberadas_por_paso.get(key, 0.0),
             etiquetas_liberadas=etiquetas_liberadas_por_paso.get(key, 0),
             en_inspeccion=inspeccion_por_paso.get(key, 0.0),
@@ -414,8 +444,13 @@ def _construir_pasos(
             # de display. Disponibles = 0 (no hay "en transito" hacia almacen).
             disponibles=0.0,
             etiquetas_disponibles=0,
-            recibidas=wip_por_paso.get(key_virt, 0.0),
-            etiquetas_recibidas=etiquetas_por_paso.get(key_virt, 0),
+            recibidas=wip_por_paso.get(key_virt, 0.0) - insp_sig_por_paso.get(key_virt, 0.0),
+            etiquetas_recibidas=(etiquetas_por_paso.get(key_virt, 0)
+                                 - etiquetas_insp_sig_por_paso.get(key_virt, 0)),
+            # Lo que llega al buffer todavia en QC se reporta aparte, no como
+            # "Recibidas": esta contado en wip_en_paso pero no esta liberado.
+            en_inspeccion_sig=insp_sig_por_paso.get(key_virt, 0.0),
+            etiquetas_inspeccion_sig=etiquetas_insp_sig_por_paso.get(key_virt, 0),
             # Liberadas / Inspeccion / Retrabajo no aplican al Almacen WIP
             # virtual (idProceso=16 es de catalogo, no fisico -> no genera
             # bUltimoProceso=1).
@@ -429,13 +464,24 @@ def _construir_pasos(
             label="",
         ))
 
-    # Pasada inversa (inclusivo del paso actual)
+    # Pasada inversa. Dos lecturas del mismo recorrido, que se distinguen solo en
+    # si el WIP parado EN el paso ya se descontó o no:
+    #
+    #   faltante[i] = req_bruto - SUM(wip[k]) k = i+1..ultimo   (EXCLUSIVO)
+    #                 -> lo que ese proceso TIENE QUE PROCESAR: la carga.
+    #   req_paso[i] = req_bruto - SUM(wip[k]) k = i  ..ultimo   (INCLUSIVO)
+    #                 -> lo que AUN NO HA LLEGADO a ese proceso.
+    #
+    # La diferencia es exactamente wip_en_paso[i]. `faltante` es la columna
+    # `Piezas` del CapacidadDetalle y del activo `plan-capacidad`; se calcula aqui
+    # —no en la UI— porque es una definicion de negocio y la fija un test.
     acum_downstream = 0.0
     for paso in reversed(pasos):
+        paso.faltante = max(0.0, req_bruto - acum_downstream)
         acum_downstream += paso.wip_en_paso
         paso.req_paso = max(0.0, req_bruto - acum_downstream)
 
     for paso in pasos:
-        paso.label = f"{paso.proceso} ({_fmt(paso.wip_en_paso)} de {_fmt(paso.req_paso)})"
+        paso.label = f"{paso.proceso} ({_fmt(paso.wip_en_paso)} de {_fmt(paso.faltante)})"
 
     return pasos

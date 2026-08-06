@@ -18,12 +18,15 @@ class FilaListado(_Base):
     idMaterial: int
     PT: str
     Descripcion: str
+    # 1 = la demanda existe pero su idMaterial (0 o NULL) no esta en tblMaterial.
+    # Es demanda REAL: cuenta piezas, pero no tiene BOM ni ruta -> sin arbol.
+    bSinMaterial: bool = False
     idCliente: Optional[int] = None
     Cliente: str
     idCiudad: Optional[int] = None
     Ciudad: str
-    idClase: Optional[int] = None    # NETSUITE.dbo.ITEMS.CLASS_ID_ARTCULO_ID
-    Clase: Optional[str] = None      # NETSUITE.dbo.CLASS_ID.LIST_ITEM_NAME
+    idClase: Optional[int] = None    # vwClassIDMaterial.CLASS_ID_ARTCULO_ID
+    Clase: Optional[str] = None      # vwClassIDMaterial.LIST_ITEM_NAME
     PiezasPend: float
     PiezasPastDue: float
     FechaPromMin: date
@@ -45,6 +48,9 @@ class CeldaCalendario(_Base):
     idMaterial: int
     PT: str
     Descripcion: str
+    # Ver FilaListado.bSinMaterial — el calendario es demanda BRUTA, asi que la
+    # linea sin material catalogado sigue contando piezas.
+    bSinMaterial: bool = False
     idCliente: Optional[int] = None
     Cliente: str
     idCiudad: Optional[int] = None
@@ -151,14 +157,22 @@ class FilaWip(_Base):
     """WIP por (componente, proceso) en 5 buckets.
 
     Compat con el netteo:
-    - `Piezas` / `Etiquetas` = Disponibles + Recibidas (lo que aun debe pasar
-      por X). Es el conjunto que alimenta el netteo via `wip_en_paso`.
+    - `Piezas` / `Etiquetas` = Disponibles + Recibidas + EnInspeccionSig (lo que
+      aun debe pasar por X). Es el conjunto que alimenta el netteo via
+      `wip_en_paso`.
 
-    Desglose display (no afecta el netteo):
+    Desglose del bucket que netea:
     - `PiezasDisponibles` / `EtiquetasDisponibles` = estatus=LIBERADO, sig=X,
       ubicacion <> X (espera entrar, fisicamente fuera de X).
     - `PiezasRecibidas` / `EtiquetasRecibidas` = estatus=LIBERADO, sig=X,
       ubicacion = X (ya esta fisicamente en X).
+    - `PiezasInspeccionSig` / `EtiquetasInspeccionSig` = estatus=POR INSPECCION,
+      sig=X. Va camino a X pero sigue en QC. **Cuenta en el netteo desde
+      2026-08-03** (huella FIFO del CLR: 4% de las asignaciones, 99.5% de
+      acierto) — es lo que hace `plan-capacidad`, y unificarlo puso a los dos
+      motores a netear contra el mismo pool.
+
+    Desglose display (no afecta el netteo):
     - `PiezasLiberadas` / `EtiquetasLiberadas` = piezas que ya salieron de X
       (procesoActual=X, sig <> X). Reemplaza al viejo "Liberadas".
     - `PiezasInspeccion` / `EtiquetasInspeccion` = bUltimoProceso=X ∧ estatus
@@ -175,6 +189,8 @@ class FilaWip(_Base):
     PiezasDisponibles: float = 0.0
     EtiquetasRecibidas: int = 0
     PiezasRecibidas: float = 0.0
+    EtiquetasInspeccionSig: int = 0
+    PiezasInspeccionSig: float = 0.0
     EtiquetasLiberadas: int = 0
     PiezasLiberadas: float = 0.0
     EtiquetasInspeccion: int = 0
@@ -191,6 +207,9 @@ class FilaDemandaUniverso(_Base):
     idMaterial: int
     PT: str
     PiezasPend: float
+    # Promesa mas antigua pendiente del PT. Es la llave del reparto FIFO del WIP
+    # compartido: el mas vencido se sirve primero. None = sin fecha (va al final).
+    FechaPromMin: Optional[date] = None
 
 
 class FilaAristaUniverso(_Base):
@@ -241,16 +260,24 @@ class PasoRuta(_Base):
     ruta: Optional[str] = None
     idPlanta: Optional[int] = None
     es_virtual: bool = False
-    req_paso: float = 0.0           # piezas que aun deben pasar por este step
-    # wip_en_paso = Disponibles + Recibidas (suma compat con el netteo).
-    # Es el unico campo que descuenta req_paso.
+    # LA CARGA DEL PROCESO: piezas que este paso tiene que procesar, incluidas las
+    # que ya estan esperando en el. Es la columna `Piezas` del CapacidadDetalle y
+    # el numero que muestra el ProcessNode en modo Requerimiento.
+    faltante: float = 0.0
+    # Lo que AUN NO HA LLEGADO a este paso: faltante - wip_en_paso. Alimenta el
+    # netteo aguas arriba; no es la carga del proceso.
+    req_paso: float = 0.0
+    # wip_en_paso = Disponibles + Recibidas + EnInspeccionSig (suma compat con el
+    # netteo). Es el unico campo que descuenta req_paso.
     wip_en_paso: float = 0.0
     etiquetas_en_paso: int = 0
-    # Desglose display del WIP que aun debe pasar por X
+    # Desglose del WIP que aun debe pasar por X (los tres SI netean)
     disponibles: float = 0.0        # estatus=LIBERADO, sig=X, ubic <> X
     etiquetas_disponibles: int = 0
     recibidas: float = 0.0          # estatus=LIBERADO, sig=X, ubic = X
     etiquetas_recibidas: int = 0
+    en_inspeccion_sig: float = 0.0  # estatus=POR INSPECCION, sig=X (en QC, va a X)
+    etiquetas_inspeccion_sig: int = 0
     # Salidas de X (solo display)
     liberadas: float = 0.0          # estatus=LIBERADO, procActual=X, sig <> X
     etiquetas_liberadas: int = 0
@@ -275,7 +302,13 @@ class NodoComponente(_Base):
     tipo_material: int              # 1 = PT, 3 = Intermedio
     cantidad_ensamble_total: float  # suma de CantEnsamble por todas las apariciones
     req_bruto: float                # demanda total antes de descontar WIP
+    # WIP que ESTE PT puede consumir: su cuota del reparto FIFO cuando el
+    # componente es compartido. Es el que descuenta `req_neto`.
     wip_total: float
+    # Piezas fisicas en piso del componente, SIN repartir. Igual a `wip_total`
+    # cuando nadie mas reclama el componente. La card muestra "wip_total de
+    # wip_fisico en piso" para que el reparto sea visible.
+    wip_fisico: float = 0.0
     req_neto: float                 # demanda neta despues de descontar WIP
     ruta: list[PasoRuta] = Field(default_factory=list)
     cadena_ruta: str = ""           # ej. "Corte (0 de 0) -> Doblez (120 de 200) -> ..."
