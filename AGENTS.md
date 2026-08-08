@@ -63,14 +63,17 @@ sustituyen.
 Rastreabilidad-app/
 ├── AGENTS.md                  ← este archivo
 ├── README.md                  ← quickstart para humanos
+├── listados/                  ← universos de filtrado: un CSV (ClaveMaterial, idMaterial)
+│   ├── listados.json          ←   por cliente + manifiesto con slug y nombre visible
+│   └── caterpillar.csv
 ├── backend/
 │   ├── pyproject.toml
 │   ├── src/rbom_api/
 │   │   ├── main.py            ← app factory + middlewares + StaticFiles mount
 │   │   ├── config.py          ← Settings (pydantic-settings) + SQL_DIR
-│   │   ├── deps.py            ← Depends(get_conn): pyodbc fresh por request
+│   │   ├── deps.py            ← Depends(get_conn): pyodbc fresh por request; universo_ids
 │   │   ├── logging_setup.py   ← structlog + CorrelationIdMiddleware
-│   │   ├── routers/           ← health, pts, arbol, bloques, requerimiento, export
+│   │   ├── routers/           ← health, pts, listados, arbol, bloques, requerimiento, export
 │   │   ├── services/          ← arbol_service (orquestación)
 │   │   ├── domain/            ← modelo (pydantic), netteo (algoritmo), db (pyodbc)
 │   │   ├── sql/               ← Q_listado, Q_detalle, Q_bloques, Q_pts_en_proceso, Q_plantas,
@@ -89,7 +92,7 @@ Rastreabilidad-app/
 │   │   ├── store/useUiStore.ts ← zustand: view, filtros, selectedPtIds, activeTabId, mode, expanded, procesoFiltro
 │   │   ├── components/
 │   │   │   ├── Canvas/        ← ArbolCanvas + 3 nodos custom (PtNode/ComponentNode/ProcessNode) + PartThumbnail + EmptyState
-│   │   │   ├── Sidebar/       ← Sidebar + FiltersHeader + PtTable + ClienteCombobox + CiudadMultiSelect + ClaseMultiSelect + CalendarioPanel
+│   │   │   ├── Sidebar/       ← Sidebar + UniversoSelect + FiltersHeader + PtTable + ClienteCombobox + CiudadMultiSelect + ClaseMultiSelect + CalendarioPanel
 │   │   │   ├── Summary/       ← SummaryView (vista Resumen) + TipoMaterialSelect
 │   │   │   ├── Tabs.tsx       ← tab "Resumen" fija + un tab por PT abierto
 │   │   │   └── ModeToggle.tsx
@@ -120,7 +123,8 @@ Rastreabilidad-app/
 | Tocar la vista Flujo (grafo de procesos) | `backend/src/rbom_api/sql/Q_flujo.sql` + `domain/db.py` (`fetch_flujo`) → `frontend/src/lib/buildFlujo.ts` → `frontend/src/components/Summary/{FlujoCanvas,FlujoProcessNode,FlujoEdge}.tsx` |
 | Tocar la vista Calendario de requerimiento (panel expandible del sidebar) | `backend/src/rbom_api/sql/Q_requerimiento_calendario.sql` + `Q_orden_detalle.sql` → `backend/src/rbom_api/domain/db.py` (`fetch_requerimiento_calendario`, `fetch_orden_detalle`) → `routers/requerimiento.py` → `frontend/src/api/queries.ts` (`useRequerimientoCalendario`, `useOrdenDetalle`) → `frontend/src/components/Sidebar/CalendarioPanel.tsx` → `frontend/src/store/useUiStore.ts` (campos `sidebarExpanded`, `calGranularidad`, `calIncluyeForecast`, `calModo`, `celdaDetalle`). La celda es demanda BRUTA por fecha — NO nettea WIP (eso sigue viviendo en el árbol). |
 | Tocar el historial de EMBARQUES del Calendario (fase 2; columnas azules a la izquierda del Past-due) | `backend/src/rbom_api/sql/Q_embarques_calendario.sql` + `Q_remision_detalle.sql` → `domain/db.py` (`fetch_embarques_calendario`, `fetch_remision_detalle`) → `routers/requerimiento.py` (`/embarques`, `/remision-detalle`) → `frontend/src/api/queries.ts` (`useEmbarquesCalendario`, `useRemisionDetalle`) → `frontend/src/components/Sidebar/CalendarioPanel.tsx` (eje unificado `[emb … | Esta semana | … req]`; el bucket actual es una columna `kind:"presente"` que consolida en franjas apiladas embarcado/past-due/requerimiento; `calModo`). Fuente: `EPS.dbo.vwRemisiones` con puentes Item_Id→idMaterial / Customer_Id→IdNetSuit / City→tblCiudad. Filas ANCLA = requerimiento; tope `MAX_FILAS=250`. |
-| Tocar el universo Caterpillar (CSV) | `backend/src/rbom_api/domain/universos.py` + `config.py` (`numeros_criticos_path`) → `domain/db.py` (`_pt_universo_predicate`) → `frontend/src/components/Sidebar/UniversoTabs.tsx` + `store/useUiStore.ts` (`universo`) |
+| **Agregar un listado de críticos de un cliente** | `listados/` (deja el CSV + su entrada en `listados.json`). **No se toca código**: el backend descubre los listados por el manifiesto y el selector se puebla desde `GET /api/listados` |
+| Tocar el mecanismo de universos (listados) | `listados/listados.json` → `backend/src/rbom_api/domain/universos.py` + `config.py` (`listados_manifiesto`) → `deps.py` (`universo_ids`) → `routers/listados.py` → `domain/db.py` (`_pt_universo_predicate`) → `frontend/src/components/Sidebar/UniversoSelect.tsx` + `store/useUiStore.ts` (`universo`) |
 | Componente de carga / skeleton | `frontend/src/components/ui/Skeleton.tsx` (`Skeleton` / `NumberSkeleton`) |
 | Agregar / cambiar un filtro del Resumen | `frontend/src/store/useUiStore.ts` (campo `filters`) → `frontend/src/components/Sidebar/*MultiSelect.tsx` → `frontend/src/api/queries.ts` (`useBloques` + `usePtsEnProceso`) → `backend/src/rbom_api/routers/bloques.py` + `Q_bloques.sql` + `Q_pts_en_proceso.sql` |
 | Drill-down Resumen → árbol | `frontend/docs/data-flow.md` (sección drill-down) → `frontend/src/components/Canvas/ArbolCanvas.tsx` (auto-expand + highlight) → `frontend/src/lib/buildGraph.ts` (`HighlightFiltro`) |
@@ -163,7 +167,11 @@ cd backend
   - **Parámetro `fecha_max`** opcional en `/api/pts` y `/api/pts/{id}/arbol` para acotar el techo de la ventana de demanda (past-due sigue incluido).
   - **Expansión de procesos** como nodos en el canvas (chip "procesos" con icono de árbol en la cabecera de cards expandibles).
   - **Vista Flujo** (`GET /api/flujo` → `Q_flujo.sql`): grafo de procesos conectados (un bloque por `proceso × planta`, aristas `origen → destino`). La **estructura** sale de las rutas de fabricación (`tblMaterialRutaTiempo` + `LEAD`), incluye bloques/aristas **en cero**, y el WIP se **sobrepone** (LEFT JOIN). Toggle "Tarjetas ⇄ Flujo" en la cabecera del Resumen. `Disponibles(Y)` dentro del bloque = Σ aristas entrantes; la arista X→Y = `PorTransferir` de X hacia Y.
-  - **Universo "Caterpillar Priority"** (param `universo=caterpillar`): pestaña en el sidebar que acota listado + bloques + flujo a los `idMaterial` de `NumerosCriticos.csv` (raíz del repo). El backend lo lee con `domain/universos.py` (cache por mtime) e inyecta `/*PT_UNIVERSO_FILTER*/` en `cteDem` de cada query.
+  - **Universos por listado de cliente** (param `universo=<slug>`): selector en el sidebar que acota listado + bloques + flujo + calendario a los `idMaterial` de un listado de números críticos. Los listados viven en `listados/` — un CSV `(ClaveMaterial, idMaterial)` por cliente más un manifiesto `listados.json` que les da **slug y nombre visible**—, y `GET /api/listados` los expone para poblar el selector. El backend los lee con `domain/universos.py` (cache por mtime del manifiesto **y** de cada CSV) e inyecta `/*PT_UNIVERSO_FILTER*/` en `cteDem` de cada query. Dar de alta un cliente nuevo **no toca código**.
+    - **Un slug desconocido es 400, no "sin filtro"** (`deps.universo_ids`). Degradarlo devolvería toda la demanda aparentando que el filtro corrió — el fallo más caro posible en esta app.
+    - `general` es un slug reservado: significa "sin filtro" y no puede usarlo un listado.
+    - Un listado con `n_materiales = 0` (CSV faltante o vacío) **se sigue mostrando** en el selector, con aviso. Desaparecer sería indistinguible de "ese cliente no existe".
+    - Historia: hasta ago-2026 esto era un universo único ("Caterpillar Priority") leído de `NumerosCriticos.csv` en la raíz, con un segmented control de dos pestañas (`UniversoTabs.tsx`, quitado en jul-2026). El CSV se migró a `listados/caterpillar.csv`.
   - **Vista Calendario de requerimiento** (corte 1; panel expandible del sidebar, `frontend/src/components/Sidebar/CalendarioPanel.tsx`): matriz PT × tiempo con la demanda **BRUTA** (sin nettear WIP — el neteo sigue viviendo solo en el árbol) desagregada por día vía `GET /api/requerimiento/calendario` (`Q_requerimiento_calendario.sql`). Columna Past-due fija + buckets día/semana/mes (toggle) con heatmap cercano-cálido → lejano-frío, forecast hachurado, fila Total. Clic en celda abre un popover inferior con el detalle de línea de orden vía `GET /api/requerimiento/orden-detalle` (`Q_orden_detalle.sql`: OrdenVenta, POHeader/POLine, Fecha, PiezasPend, Precio_Unitario). Grano de fila = (PT × Cliente × Ciudad), igual que `Q_listado.sql` — un mismo PT puede repetirse. Toggle lista ⇄ calendario es un tercer estado de ancho del sidebar (`useUiStore.sidebarExpanded`).
   - **Historial de embarques en el Calendario** (fase 2, entregada): columnas azules a la IZQUIERDA del Past-due con lo embarcado por periodo (la actual pegada al Past-due, hacia atrás), vía `GET /api/requerimiento/embarques` (`Q_embarques_calendario.sql`, fuente `EPS.dbo.vwRemisiones`). Toggle `calModo` (`"requerimiento" | "embarques" | "ambos"`, default "ambos"). Eje unificado `[emb … | Esta semana | … req]`, navegable con ◀▶ (mismo offset). **El bucket actual se consolida en una sola columna `kind:"presente"`** (en vez de 3): franjas apiladas embarcado (↑) / past-due (!) / requerimiento (●), cada una con su heatmap y su propio detalle. `colsEmb` excluye el bucket actual cuando `incluyeReq`; `colsReq` siempre lo excluye; ambos van a `presenteCol`. Clic en celda de embarque → detalle de remisiones vía `GET /api/requerimiento/remision-detalle` (`Q_remision_detalle.sql`). Puentes NetSuite→EPS: `Item_Id→idMaterial` (vía `tblDemandaEPS` activa, acota al universo de la demanda), `Customer_Id→tblCliente.IdNetSuit`, `City→tblCiudad` (best-effort, sin match → "(sin ciudad)"). Filas ANCLA = requerimiento (los embarques solo enriquecen; en modo embarques-puro sí crean fila); tope `MAX_FILAS=250` con aviso. Los folios de `vwRemisiones` vienen numéricos → CAST a varchar en el SQL.
   - **Conexión con `ezi-data-core`** (2026-08-03): el repo quedó registrado como activo
@@ -183,8 +191,10 @@ cd backend
 3. **NO romper el contrato del netteo** — `pytest -m "not e2e"` (9 tests) debe quedar verde después de tus cambios. Los tests son el ground truth ejecutable del algoritmo.
 4. **NO cambiar `extra="ignore"` en los modelos pydantic** — el schema de EPS evoluciona; los modelos deben tolerar columnas extra.
 5. **NO mover el layout cache fuera de module-level** (`frontend/src/lib/layoutCache.ts`) — está ahí a propósito para sobrevivir el desmonte del canvas al cambiar de tab.
-6. **NO cambiar las queryKeys del frontend sin alinear el cache** (el universo
-   `general | caterpillar` es la primera dimensión de los listados/Resumen/Flujo):
+6. **NO cambiar las queryKeys del frontend sin alinear el cache** (el slug del
+   universo — `general` o el de un listado — es la primera dimensión de los
+   listados/Resumen/Flujo; por eso **un slug publicado no se renombra**: la
+   caché vieja queda huérfana sin que nada falle):
    - `["arbol", idPt, ventana, fechaMax]` — `staleTime: Infinity` (cache de sesión).
    - `["pts", universo, ventana, fechaMax]` — `staleTime: 5 min` (espeja TTL backend).
    - `["bloques", universo, clientesKey, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
@@ -193,6 +203,7 @@ cd backend
    - `["pts-en-proceso", universo, idProceso, clientesKey, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
    - `["etiquetas-detalle", universo, idProceso, bucket, destino, clientesKey, planta, ciudadesKey, tiposKey, clasesKey]` — `staleTime: 2 min`.
    - `["plantas"]` — `staleTime: 10 min`.
+   - `["listados"]` — `staleTime: 10 min` (opciones del selector de universo; cambia solo al editar `listados/`).
    - `["requerimiento-cal", universo, ventana, fechaMax]` — `staleTime: 5 min` (espeja TTL backend, igual que `pts`). Alimenta el panel Calendario; cliente/ciudad/forecast/granularidad se resuelven client-side sobre el mismo result-set, sin re-fetch.
    - `["orden-detalle", idMaterial, cliente, ciudad, desde, hasta, forecast]` — `staleTime: 2 min` (popover de detalle de una celda de requerimiento del Calendario).
    - `["embarques-cal", universo, mesesAtras]` — `staleTime: 5 min` (fase 2 del Calendario: historial de embarques, columnas azules a la IZQUIERDA del Past-due). Cliente/ciudad/pt/granularidad se resuelven client-side sobre el mismo result-set, sin re-fetch.

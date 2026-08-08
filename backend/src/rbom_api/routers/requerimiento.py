@@ -20,23 +20,24 @@ from __future__ import annotations
 import threading
 import time
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated
 
 import pyodbc
 import structlog
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, Query
 
-from ..deps import get_conn
+from ..deps import get_conn, universo_ids as _universo_ids
 from ..domain import db
 from ..domain.modelo import CeldaCalendario, CeldaEmbarque, OrdenLinea, RemisionLinea
-from ..domain.universos import cargar_universo_caterpillar
 
 
 router = APIRouter(prefix="/api/requerimiento", tags=["requerimiento"])
 log = structlog.get_logger("rbom_api.routers.requerimiento")
 
-Universo = Literal["general", "caterpillar"]
+# Slug del universo: "general" (sin filtro) o el de un listado de
+# `listados/listados.json`. Ver deps.universo_ids.
+Universo = str
 
 
 # Cache /calendario: (universo, ventana, fecha_max_iso | None). Espeja GET /pts.
@@ -64,9 +65,9 @@ def get_calendario(
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[CeldaCalendario]:
     fecha_max_iso = fecha_max.isoformat() if fecha_max else None
-    uni = cargar_universo_caterpillar() if universo == "caterpillar" else None
+    uni = _universo_ids(universo)
     if uni is not None and len(uni) == 0:
-        return []  # Caterpillar sin numeros criticos cargados
+        return []  # listado sin numeros criticos cargados
     key = (universo, ventana, fecha_max_iso)
     with _lock:
         cached = _cache_cal.get(key)
@@ -150,9 +151,9 @@ def get_embarques(
     la izquierda del Past-due en el panel Calendario. Cliente/ciudad/pt/
     granularidad se resuelven client-side sobre el result-set (sin re-fetch),
     igual que /calendario."""
-    uni = cargar_universo_caterpillar() if universo == "caterpillar" else None
+    uni = _universo_ids(universo)
     if uni is not None and len(uni) == 0:
-        return []  # Caterpillar sin numeros criticos cargados
+        return []  # listado sin numeros criticos cargados
     key = (universo, meses_atras)
     with _lock:
         cached = _cache_emb.get(key)

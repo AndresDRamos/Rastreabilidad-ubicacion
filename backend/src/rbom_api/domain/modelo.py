@@ -12,6 +12,24 @@ class _Base(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+# ---------- Listados de numeros criticos (universos de filtrado) -------------
+
+class ListadoInfo(_Base):
+    """Un listado de numeros criticos declarado en `listados/listados.json`.
+
+    Alimenta el selector de universo del sidebar. `slug` es el valor del
+    parametro `?universo=` y es parte de las queryKeys del frontend: estable.
+    """
+    slug: str
+    nombre: str
+    archivo: str
+    descripcion: Optional[str] = None
+    actualizado: Optional[str] = None
+    # 0 = el CSV no existe o no trajo filas validas. El listado se sigue
+    # reportando para que el problema sea visible en la UI, no un hueco.
+    n_materiales: int = 0
+
+
 # ---------- Result-sets de Q_listado.sql / Q_detalle.sql ---------------------
 
 class FilaListado(_Base):

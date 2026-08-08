@@ -1,0 +1,15 @@
+{
+  "_nota": "Registro de listados de numeros criticos por cliente. Cada entrada apunta a un CSV (ClaveMaterial, idMaterial) de esta carpeta; el backend usa la columna idMaterial como universo de filtrado de PTs. El 'nombre' es lo que ve el usuario en el selector del sidebar.",
+  "_como_agregar": "Deja el CSV aqui con encabezado (ClaveMaterial, idMaterial), agrega su entrada abajo y listo: el backend descubre los listados por este archivo y recarga solo cuando cambia el mtime. El slug es el valor del parametro ?universo= y NO debe cambiar despues de publicado (es parte de las queryKeys del frontend).",
+
+  "listados": [
+    {
+      "slug": "caterpillar",
+      "nombre": "Caterpillar",
+      "archivo": "caterpillar.csv",
+      "descripcion": "Criticos de la semana que Torre de Control pide a planta. Excluye las clases PTA y TI de NetSuite, que no se segmentan.",
+      "origen": "ezi-data-core / estudios/Criticos_Semana — carga de la semana 33/2026 (FechaProgramada 2026-08-12), listado 'Criticos TorreControl_05_08 CAT.csv'",
+      "actualizado": "2026-08-07"
+    }
+  ]
+}

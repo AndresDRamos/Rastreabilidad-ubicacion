@@ -11,12 +11,29 @@ import type {
   FilaListado,
   FlujoPlantasResponse,
   FlujoResponse,
+  ListadoInfo,
   OrdenLinea,
   Planta,
   PTEnProceso,
   RemisionLinea,
   Universo,
 } from "./types";
+
+/** Listados de numeros criticos disponibles como universo de filtrado.
+ *
+ *  No incluye "General" — eso no es un listado, es la ausencia de filtro; el
+ *  selector lo antepone. Cambia solo cuando se edita el manifiesto o un CSV,
+ *  asi que se cachea largo. */
+export function useListados() {
+  return useQuery<ListadoInfo[]>({
+    queryKey: ["listados"],
+    queryFn: async () => {
+      const { data } = await apiClient.get<ListadoInfo[]>("/listados");
+      return data;
+    },
+    staleTime: 10 * 60 * 1000, // 10 min — igual que /plantas
+  });
+}
 
 export function usePts(
   ventana: number = 3,

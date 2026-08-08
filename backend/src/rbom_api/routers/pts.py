@@ -8,21 +8,23 @@ from __future__ import annotations
 
 import threading
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated
 
 import pyodbc
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, Query
 
-from ..deps import get_conn
+from ..deps import get_conn, universo_ids as _universo_ids
 from ..domain.modelo import FilaListado
-from ..domain.universos import cargar_universo_caterpillar
 from ..services.arbol_service import listar_pts
 
 
 router = APIRouter(prefix="/api", tags=["pts"])
 
-Universo = Literal["general", "caterpillar"]
+# Slug del universo: "general" (sin filtro) o el de un listado de
+# `listados/listados.json`. Se valida al resolverlo, no con un Literal, para
+# que agregar un listado sea solo dejar su CSV y su entrada en el manifiesto.
+Universo = str
 
 
 # Cache compartido entre requests. TTL 5 min.
@@ -42,9 +44,9 @@ def get_pts(
     conn: pyodbc.Connection = Depends(get_conn),
 ) -> list[FilaListado]:
     fecha_max_iso = fecha_max.isoformat() if fecha_max else None
-    uni = cargar_universo_caterpillar() if universo == "caterpillar" else None
+    uni = _universo_ids(universo)
     if uni is not None and len(uni) == 0:
-        return []  # Caterpillar sin numeros criticos cargados
+        return []  # listado sin numeros criticos cargados
     key = (universo, ventana, fecha_max_iso)
     with _lock:
         cached = _cache.get(key)

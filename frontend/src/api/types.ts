@@ -259,11 +259,30 @@ export interface EtiquetaDetalle {
   ubicacionNombre: string | null;
 }
 
-// ---------- Universo de filtrado (pestana del sidebar) ----------------------
+// ---------- Universo de filtrado (selector del sidebar) ---------------------
 
-// "general" = todo el universo de demanda. "caterpillar" = solo los idMaterial
-// del CSV de numeros criticos (NumerosCriticos.csv, lado backend).
-export type Universo = "general" | "caterpillar";
+// Slug del universo activo. `UNIVERSO_GENERAL` = toda la demanda; cualquier
+// otro valor es el slug de un listado de numeros criticos que el backend
+// declara en `listados/listados.json` y expone en GET /api/listados.
+//
+// No es una union cerrada a proposito: agregar un listado es dejar su CSV y su
+// entrada en el manifiesto, sin tocar el frontend. El slug es parte de las
+// queryKeys, asi que cambiar uno publicado invalida cache de forma silenciosa.
+export type Universo = string;
+
+export const UNIVERSO_GENERAL = "general";
+
+/** Espejo de `ListadoInfo` (backend/src/rbom_api/domain/modelo.py). */
+export interface ListadoInfo {
+  slug: string;
+  nombre: string;
+  archivo: string;
+  descripcion: string | null;
+  actualizado: string | null;
+  /** 0 = el CSV no existe o vino vacio. La opcion se muestra igual, para que
+   *  el problema se vea en vez de faltar una opcion sin explicacion. */
+  n_materiales: number;
+}
 
 // Modo de la vista Resumen: tarjetas sueltas o grafo de flujo conectado.
 export type ResumenMode = "cards" | "flujo";

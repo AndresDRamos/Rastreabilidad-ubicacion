@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .config import get_settings
 from .logging_setup import CorrelationIdMiddleware, configurar_logging, log
-from .routers import arbol, bloques, export, health, pts, requerimiento
+from .routers import arbol, bloques, export, health, listados, pts, requerimiento
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(health.router)
     app.include_router(pts.router)
+    app.include_router(listados.router)
     app.include_router(arbol.router)
     app.include_router(bloques.router)
     app.include_router(requerimiento.router)

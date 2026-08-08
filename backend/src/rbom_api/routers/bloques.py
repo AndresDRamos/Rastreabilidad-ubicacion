@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Annotated, Literal
+from typing import Annotated
 
 import pyodbc
 import structlog
@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, Query
 
 from fastapi import HTTPException
 
-from ..deps import get_conn
+from ..deps import get_conn, universo_ids as _universo_ids
 from ..domain import db
 from ..domain.modelo import (
     BloqueProceso,
@@ -31,26 +31,15 @@ from ..domain.modelo import (
     Planta,
     PTEnProceso,
 )
-from ..domain.universos import cargar_universo_caterpillar
 
 
 router = APIRouter(prefix="/api", tags=["bloques"])
 log = structlog.get_logger("rbom_api.routers.bloques")
 
-# Universos de filtrado (pestana del sidebar). "general" = sin filtro de
-# universo; "caterpillar" = solo los idMaterial del CSV de numeros criticos.
-Universo = Literal["general", "caterpillar"]
-
-
-def _universo_ids(universo: str) -> frozenset[int] | None:
-    """Resuelve el param `universo` a un set de idMaterial.
-
-    None = sin filtro (General). frozenset (posiblemente vacia) para Caterpillar:
-    el caller debe cortocircuitar a respuesta vacia cuando sea vacia, para no
-    devolver el universo completo por error."""
-    if universo == "caterpillar":
-        return cargar_universo_caterpillar()
-    return None
+# Slug del universo (selector del sidebar): "general" = sin filtro; cualquier
+# otro = un listado de `listados/listados.json`. Se valida al resolverlo, no
+# con un Literal, para que agregar un listado no toque codigo.
+Universo = str
 
 
 # Cache compartido entre requests. Keys incluyen filtros (y el universo) para no

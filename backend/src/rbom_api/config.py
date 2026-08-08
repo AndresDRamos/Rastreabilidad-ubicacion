@@ -42,10 +42,10 @@ class Settings(BaseSettings):
     almacen_wip_proceso_id: int = 16
     almacen_wip_proceso_nombre: str = "Almacen WIP"
 
-    # Universo "Caterpillar Priority": archivo CSV con (ClaveMaterial, idMaterial)
-    # de los numeros criticos. Default = raiz del repo. Override via env
-    # NUMEROS_CRITICOS_PATH.
-    numeros_criticos_path: Path = REPO_ROOT / "NumerosCriticos.csv"
+    # Listados de numeros criticos por cliente: manifiesto JSON que declara
+    # (slug, nombre, archivo) y CSVs (ClaveMaterial, idMaterial) a su lado.
+    # Override via env LISTADOS_MANIFIESTO.
+    listados_manifiesto: Path = REPO_ROOT / "listados" / "listados.json"
 
     # App
     log_level: str = "INFO"
